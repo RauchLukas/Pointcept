@@ -1,3 +1,6 @@
+wandb/
+exp/
+
 image/
 __pycache__
 **/build/
