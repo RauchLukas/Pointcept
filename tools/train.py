@@ -13,6 +13,8 @@ from pointcept.engines.defaults import (
 from pointcept.engines.train import Trainer
 from pointcept.engines.launch import launch
 
+import wandb
+
 
 def main_worker(cfg):
     cfg = default_setup(cfg)
@@ -24,6 +26,8 @@ def main():
     args = default_argument_parser().parse_args()
     cfg = default_config_parser(args.config_file, args.options)
 
+    wandb.init(project="Scanner-MonacumOune", sync_tensorboard=True)
+
     launch(
         main_worker,
         num_gpus_per_machine=args.num_gpus,
@@ -33,6 +37,7 @@ def main():
         cfg=(cfg,),
     )
 
+    wandb.finish()
 
 if __name__ == "__main__":
     main()
