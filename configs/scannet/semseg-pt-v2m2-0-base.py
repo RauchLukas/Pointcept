@@ -38,7 +38,7 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 900
+epoch = 200
 optimizer = dict(type="AdamW", lr=0.005, weight_decay=0.02)
 scheduler = dict(
     type="OneCycleLR",
@@ -51,7 +51,7 @@ scheduler = dict(
 
 # dataset settings
 dataset_type = "ScanNetDataset"
-data_root = "data/scannet"
+data_root = "/workspace/data/scannet"
 
 data = dict(
     num_classes=20,

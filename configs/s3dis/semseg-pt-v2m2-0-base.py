@@ -37,13 +37,13 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 3000
+epoch = 300
 optimizer = dict(type="AdamW", lr=0.006, weight_decay=0.05)
 scheduler = dict(type="MultiStepLR", milestones=[0.6, 0.8], gamma=0.1)
 
 # dataset settings
 dataset_type = "S3DISDataset"
-data_root = "data/s3dis"
+data_root = "/workspace/data/s3dis"
 
 data = dict(
     num_classes=13,
