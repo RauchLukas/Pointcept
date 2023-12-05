@@ -25,8 +25,9 @@ def main_worker(cfg):
 def main():
     args = default_argument_parser().parse_args()
     cfg = default_config_parser(args.config_file, args.options)
-
-    wandb.init(project="Scanner-MonacumOune", sync_tensorboard=True)
+    
+    wandb.tensorboard.patch(root_logdir="./exp/s3dis/semseg-pt-v2m2-0-base-01")
+    wandb.init(project="Scanner-MonacumOune-s3dis", sync_tensorboard=True)
 
     launch(
         main_worker,
