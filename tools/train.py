@@ -10,7 +10,7 @@ from pointcept.engines.defaults import (
     default_config_parser,
     default_setup,
 )
-from pointcept.engines.train import Trainer
+from pointcept.engines.train import TRAINERS
 from pointcept.engines.launch import launch
 
 import wandb
@@ -18,7 +18,7 @@ import wandb
 
 def main_worker(cfg):
     cfg = default_setup(cfg)
-    trainer = Trainer(cfg)
+    trainer = TRAINERS.build(dict(type=cfg.train.type, cfg=cfg))
     trainer.train()
 
 
