@@ -190,7 +190,7 @@ class SemSegTester(TesterBase):
                             torch.cuda.empty_cache()
                         bs = 0
                         for be in input_dict["offset"]:
-                            pred[idx_part[bs:be], :] += pred_part[bs:be]
+                            pred[idx_part[bs:be], :] += pred_part[bs:be]  # voting. sum up suggested predictions
                             bs = be
 
                     logger.info(
@@ -202,11 +202,11 @@ class SemSegTester(TesterBase):
                             batch_num=len(fragment_list),
                         )
                     )
-                pred = pred.max(1)[1].data.cpu().numpy()
+                pred = pred.max(1)[1].data.cpu().numpy()        # choose highest voting
                 np.save(pred_save_path, pred)
             if "origin_segment" in data_dict.keys():
                 assert "inverse" in data_dict.keys()
-                pred = pred[data_dict["inverse"]]
+                pred = pred[data_dict["inverse"]]       # reverse vexelization by index list
                 segment = data_dict["origin_segment"]
             intersection, union, target = intersection_and_union(
                 pred, segment, self.cfg.data.num_classes, self.cfg.data.ignore_index
@@ -281,10 +281,17 @@ class SemSegTester(TesterBase):
                         save_path,
                         "submit",
                         "lidarseg",
-                        "test",
                         "{}_lidarseg.bin".format(data_name),
                     )
                 )
+            elif self.cfg.data.test.type == "Rohbau3DDataset":
+                np.save(os.path.join(
+                        save_path,
+                        "submit",
+                        "lidarseg",
+                        "{}_lidarseg.npy".format(data_name),
+                            ),
+                        pred)
 
         logger.info("Syncing ...")
         comm.synchronize()
