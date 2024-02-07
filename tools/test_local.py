@@ -32,8 +32,8 @@ def main():
     "--config-file", "Pointcept/configs/rohbau3d/semseg-pt-v2m1-1-base.py",
     "--num-gpus", "1",
     "--options", 
-        "save_path=Pointcept/exp/test", 
-        "weight=Pointcept/exp/test/model/model_best.pth",
+        "save_path=Pointcept/exp/big_run", 
+        "weight=Pointcept/exp/big_run/model/model_best.pth",
 
     ]
 

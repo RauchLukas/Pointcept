@@ -29,14 +29,16 @@ def main():
     my_args = [
         "--config-file", "Pointcept/configs/rohbau3d/semseg-pt-v2m1-1-base.py",
         "--num-gpus", "1",
-        "--options", "save_path=Pointcept/exp/test",
+        "--options", "save_path=Pointcept/exp/big_run",
+            "resume=True", 
+            "weight=Pointcept/exp/big_run/model/model_best.pth"
     ]
 
     args = default_argument_parser().parse_args(my_args)
     cfg = default_config_parser(args.config_file, args.options)
     
     wandb.tensorboard.patch(root_logdir="./exp/Rohbau3D/semseg-pt-v2m2-0-base-01")
-    wandb.init(project="RB3D_PNTCPT_first", sync_tensorboard=True)
+    wandb.init(project="RB3D_BIG_RUN", sync_tensorboard=True)
 
     launch(
         main_worker,

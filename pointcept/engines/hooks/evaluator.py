@@ -108,6 +108,24 @@ class SemSegEvaluator(HookBase):
         if self.trainer.cfg.evaluate:
             self.eval()
 
+    def leak_predictions(self, id, input_dict, pred, exp_dir):
+        import os
+        from os.path import join
+
+        if not os.path.exists(exp_dir):
+            os.makedirs(exp_dir, exist_ok=True)
+        
+        export_file = join(exp_dir, "crop_{}.npy" .format(id))
+
+        coord = input_dict['coord'].cpu().numpy()
+        color = input_dict['color'].cpu().numpy()
+        segment = input_dict['segment'].cpu().numpy().reshape(-1, 1)
+        pred = pred.cpu().numpy().reshape(-1, 1)
+
+        pcd = np.concatenate((coord, color, segment, pred), axis=1)
+        np.save(export_file, pcd)
+
+
     def eval(self):
         self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
         self.trainer.model.eval()
@@ -121,6 +139,10 @@ class SemSegEvaluator(HookBase):
             loss = output_dict["loss"]
             pred = output.max(1)[1]
             segment = input_dict["segment"]
+
+            # TODO Remove [RAUCH]
+            self.leak_predictions(i, input_dict, pred, exp_dir="Pointcept/exp/leak/")
+
             if "origin_coord" in input_dict.keys():
                 idx, _ = pointops.knn_query(
                     1,

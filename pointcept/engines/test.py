@@ -7,6 +7,7 @@ Please cite our work if the code is helpful to you.
 
 import os
 import time
+from pathlib import Path
 import numpy as np
 from collections import OrderedDict
 import torch
@@ -154,6 +155,11 @@ class SemSegTester(TesterBase):
                 os.path.join(save_path, "submit", "test", "submission.json"), "w"
             ) as f:
                 json.dump(submission, f, indent=4)
+        elif self.cfg.data.test.type == "Rohbau3DDataset" and comm.is_main_process(): 
+            make_dirs(
+                os.path.join(save_path, "full")
+            )
+
         comm.synchronize()
         record = {}
         # fragment inference
@@ -203,6 +209,7 @@ class SemSegTester(TesterBase):
                         )
                     )
                 pred = pred.max(1)[1].data.cpu().numpy()        # choose highest voting
+                Path(pred_save_path).parent.mkdir(parents=True, exist_ok=True)
                 np.save(pred_save_path, pred)
             if "origin_segment" in data_dict.keys():
                 assert "inverse" in data_dict.keys()
@@ -285,13 +292,13 @@ class SemSegTester(TesterBase):
                     )
                 )
             elif self.cfg.data.test.type == "Rohbau3DDataset":
-                np.save(os.path.join(
+
+                file_path = os.path.join(
                         save_path,
-                        "submit",
-                        "lidarseg",
-                        "{}_lidarseg.npy".format(data_name),
-                            ),
-                        pred)
+                        "full",
+                        "{}_lidarseg.npy".format(data_name))
+                Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+                np.save(file_path, pred)
 
         logger.info("Syncing ...")
         comm.synchronize()
