@@ -16,6 +16,21 @@ from pointcept.engines.launch import launch
 
 import wandb
 
+import torch 
+import random
+import numpy as np
+
+seed = 42
+
+if seed:
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+    print(f"[WARNING] Fixed seed: Torch → {seed}")
+    print(f"[WARNING] Fixed seed: Random → {seed}")
+    print(f"[WARNING] Fixed seed: NumPy → {seed}")
+
 
 def main_worker(cfg):
     cfg = default_setup(cfg)
@@ -27,18 +42,17 @@ def main():
     # python tools/train.py --config-file ${CONFIG_PATH} --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 
     my_args = [
-        "--config-file", "Pointcept/configs/rohbau3d/semseg-pt-v2m1-1-base.py",
+        "--config-file", "Pointcept/configs/rohbau3d/semseg-pt-v3m1-0-base.py",
         "--num-gpus", "1",
-        "--options", "save_path=Pointcept/exp/big_run",
-            "resume=True", 
-            "weight=Pointcept/exp/big_run/model/model_best.pth"
+        "--options", "save_path=Pointcept/exp/pt3_base",
+            "resume=False",
     ]
 
     args = default_argument_parser().parse_args(my_args)
     cfg = default_config_parser(args.config_file, args.options)
     
-    wandb.tensorboard.patch(root_logdir="./exp/Rohbau3D/semseg-pt-v2m2-0-base-01")
-    wandb.init(project="RB3D_BIG_RUN", sync_tensorboard=True)
+    wandb.tensorboard.patch(root_logdir="Pointcept/exp/pt3_base")
+    wandb.init(project="PT3_base", sync_tensorboard=True)
 
     launch(
         main_worker,
