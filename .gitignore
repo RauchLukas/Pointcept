@@ -12,6 +12,7 @@ weights
 data
 log
 outputs/
+.cache
 .vscode
 .idea
 */.DS_Store

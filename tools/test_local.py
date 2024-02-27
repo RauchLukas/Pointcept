@@ -27,13 +27,12 @@ def main():
     # args = default_argument_parser().parse_args()
     # cfg = default_config_parser(args.config_file, args.options)
 
-
     my_args = [
-    "--config-file", "Pointcept/configs/rohbau3d/semseg-pt-v2m1-1-base.py",
+    "--config-file", "Pointcept/configs/rohbau3d/semseg-pt-v3m1-0-base.py",
     "--num-gpus", "1",
     "--options", 
-        "save_path=Pointcept/exp/big_run", 
-        "weight=Pointcept/exp/big_run/model/model_best.pth",
+        "save_path=Pointcept/exp/pt3_base",
+        "weight=Pointcept/exp/pt3_base/model/model_best.pth",
 
     ]
 

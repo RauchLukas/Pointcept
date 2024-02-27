@@ -26,8 +26,25 @@ def main():
     args = default_argument_parser().parse_args()
     cfg = default_config_parser(args.config_file, args.options)
     
-    wandb.tensorboard.patch(root_logdir="./exp/s3dis/semseg-pt-v2m2-0-base-01")
-    wandb.init(project="Scanner-MonacumOune-s3dis", sync_tensorboard=True)
+    wandb_cfg = cfg.pop("wandb", None)
+    if wandb_cfg: 
+        if wandb_cfg.track: 
+            import wandb
+            print("Tracking Run with W&B, projectname: ", wandb_cfg.project)
+
+            settings = wandb.Settings(disable_git=True)
+
+            print("[DEBUG] W&B sync from tensorboard save path: ", cfg.save_path)
+            wandb.tensorboard.patch(root_logdir=cfg.save_path, save=True, tensorboard_x=True)
+
+            wandb.init(
+                project=wandb_cfg.project,
+                notes=wandb_cfg.notes,
+                tags=wandb_cfg.tags,
+                config=cfg,
+                sync_tensorboard=True,
+                settings=settings
+            )
 
     launch(
         main_worker,
