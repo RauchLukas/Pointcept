@@ -18,13 +18,15 @@ from pointcept.utils.cache import shared_dict
 from .builder import DATASETS
 from .transform import Compose, TRANSFORMS
 
+from time import time
+
 
 @DATASETS.register_module()
 class Rohbau3DDataset(Dataset):
     def __init__(
         self,
         split="train",
-        data_root="data/rohbau3d",
+        data_root="../data/rohbau3d",
         transform=None,
         test_mode=False,
         test_cfg=None,
