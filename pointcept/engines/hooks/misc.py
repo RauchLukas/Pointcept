@@ -28,6 +28,7 @@ from pointcept.engines.test import TESTERS
 from .default import HookBase
 from .builder import HOOKS
 
+import wandb
 
 @HOOKS.register_module()
 class IterationTimer(HookBase):
@@ -126,6 +127,10 @@ class InformationWriter(HookBase):
                     self.trainer.storage.history(key).val,
                     self.curr_iter,
                 )
+        if self.trainer.cfg["wandb"] and torch.distributed.get_rank() == 0: 
+            wandb.log({"lr" : lr})
+            for key in self.model_output_keys:
+                wandb.log({"train_batch/" + key : self.trainer.storage.history(key).val})
 
     def after_epoch(self):
         epoch_info = "Train result: "
@@ -141,7 +146,9 @@ class InformationWriter(HookBase):
                     self.trainer.storage.history(key).avg,
                     self.trainer.epoch + 1,
                 )
-
+        if self.trainer.cfg["wandb"] and torch.distributed.get_rank() == 0: 
+            for key in self.model_output_keys:
+                wandb.log({"train/" + key : self.trainer.storage.history(key).val})
 
 @HOOKS.register_module()
 class CheckpointSaver(HookBase):

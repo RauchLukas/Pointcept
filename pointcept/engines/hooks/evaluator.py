@@ -17,6 +17,8 @@ from pointcept.utils.misc import intersection_and_union_gpu
 from .default import HookBase
 from .builder import HOOKS
 
+import wandb
+
 
 @HOOKS.register_module()
 class ClsEvaluator(HookBase):
@@ -191,6 +193,12 @@ class SemSegEvaluator(HookBase):
             self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
             self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
             self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+        if self.trainer.cfg["wandb"] and torch.distributed.get_rank() == 0: 
+            # Log Weights & Biases
+            wandb.log({"val/loss" : loss_avg})
+            wandb.log({"val/mIoU" : m_iou})
+            wandb.log({"val/mAcc" : m_acc})
+            wandb.log({"val/allAcc" : all_acc})
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
         self.trainer.comm_info["current_metric_value"] = m_iou  # save for saver
         self.trainer.comm_info["current_metric_name"] = "mIoU"  # save for saver

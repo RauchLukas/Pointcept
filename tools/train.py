@@ -13,9 +13,22 @@ from pointcept.engines.defaults import (
 from pointcept.engines.train import TRAINERS
 from pointcept.engines.launch import launch
 
+import torch
+import wandb
+wandb_grup_id = str(wandb.util.generate_id())
 
 def main_worker(cfg):
     cfg = default_setup(cfg)
+
+    machine_rank = torch.distributed.get_rank()
+    if cfg["wandb"] and machine_rank == 0: 
+        wandb.init(
+            project=cfg.wandb["project"],
+            config=dict(cfg),
+            notes=cfg.wandb["note"],
+            # group=cfg.wandb["experiment"],
+        )
+
     trainer = TRAINERS.build(dict(type=cfg.train.type, cfg=cfg))
     trainer.train()
 
@@ -27,6 +40,9 @@ def main():
     # wandb.tensorboard.patch(root_logdir="./exp/s3dis/semseg-pt-v2m2-0-base-01")
     # wandb.init(project="Scanner-MonacumOune-s3dis", sync_tensorboard=True)
 
+    if cfg["wandb"]: 
+        print("[DEBUG] tracking PyTorch with W&B")
+        
     launch(
         main_worker,
         num_gpus_per_machine=args.num_gpus,
@@ -38,4 +54,5 @@ def main():
 
 
 if __name__ == "__main__":
+    print(">>>>>>>>> TRAIN.py <<<<<<<<<")
     main()
