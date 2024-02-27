@@ -1,8 +1,16 @@
 _base_ = ["../_base_/default_runtime.py"]
 
+# wandb 
+wandb = dict(
+    track = True,
+    project = "S3DIS multi",
+    notes = "RUN XXXXX",
+    tags = [],
+)
+
 # misc custom setting
-batch_size = 24  # bs: total bs in all gpus
-num_worker = 48
+batch_size = 8  # bs: total bs in all gpus
+num_worker = 24
 mix_prob = 0.8
 empty_cache = False
 enable_amp = True
@@ -110,7 +118,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 100
+epoch = 10
+eval_epoch = 5
 optimizer = dict(type="SGD", lr=0.05, momentum=0.9, weight_decay=0.0001, nesterov=True)
 scheduler = dict(
     type="OneCycleLR",
@@ -148,7 +157,7 @@ data = dict(
             dict(
                 type="Structured3DDataset",
                 split="train",
-                data_root="data/structured3d",
+                data_root="../data/structured3d",
                 transform=[
                     dict(type="CenterShift", apply_z=True),
                     dict(
@@ -181,7 +190,7 @@ data = dict(
                     # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
                     dict(
                         type="GridSample",
-                        grid_size=0.02,
+                        grid_size=0.05,
                         hash_type="fnv",
                         mode="train",
                         return_grid_coord=True,
@@ -205,7 +214,7 @@ data = dict(
             dict(
                 type="ScanNetDataset",
                 split="train",
-                data_root="data/scannet",
+                data_root="../data/scannet",
                 transform=[
                     dict(type="CenterShift", apply_z=True),
                     dict(
@@ -238,7 +247,7 @@ data = dict(
                     # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
                     dict(
                         type="GridSample",
-                        grid_size=0.02,
+                        grid_size=0.05,
                         hash_type="fnv",
                         mode="train",
                         return_grid_coord=True,
@@ -262,7 +271,7 @@ data = dict(
             dict(
                 type="S3DISDataset",
                 split=("Area_1", "Area_2", "Area_3", "Area_4", "Area_6"),
-                data_root="data/s3dis",
+                data_root="../data/s3dis",
                 transform=[
                     dict(type="CenterShift", apply_z=True),
                     dict(
@@ -295,7 +304,7 @@ data = dict(
                     # dict(type="RandomColorDrop", p=0.2, color_augment=0.0),
                     dict(
                         type="GridSample",
-                        grid_size=0.02,
+                        grid_size=0.05,
                         hash_type="fnv",
                         mode="train",
                         return_grid_coord=True,
@@ -320,12 +329,12 @@ data = dict(
     val=dict(
         type="S3DISDataset",
         split="Area_5",
-        data_root="data/s3dis",
+        data_root="../data/s3dis",
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.05,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -346,7 +355,7 @@ data = dict(
     test=dict(
         type="S3DISDataset",
         split="Area_5",
-        data_root="data/s3dis",
+        data_root="../data/s3dis",
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(type="NormalizeColor"),
@@ -355,7 +364,7 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.05,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,
