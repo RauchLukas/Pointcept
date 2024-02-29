@@ -131,6 +131,7 @@ class InformationWriter(HookBase):
             wandb.log({"lr" : lr})
             for key in self.model_output_keys:
                 wandb.log({"train_batch/" + key : self.trainer.storage.history(key).val})
+                wandb.log({"current_step" : self.curr_iter})
 
     def after_epoch(self):
         epoch_info = "Train result: "
@@ -149,6 +150,7 @@ class InformationWriter(HookBase):
         if self.trainer.cfg["wandb"] and torch.distributed.get_rank() == 0: 
             for key in self.model_output_keys:
                 wandb.log({"train/" + key : self.trainer.storage.history(key).val})
+                wandb.log({"current_epoch" : self.trainer.epoch + 1})
 
 @HOOKS.register_module()
 class CheckpointSaver(HookBase):
