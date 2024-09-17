@@ -28,7 +28,7 @@ from .defaults import DefaultDataset
 @DATASETS.register_module()
 class Rohbau3DDataset(DefaultDataset):
     VALID_ASSETS = [
-        "coordinate",
+        "coord",
         "color",
         "normal",
         "strength",
@@ -53,8 +53,7 @@ class Rohbau3DDataset(DefaultDataset):
             data_dict[asset[:-4]] = np.load(os.path.join(data_path, asset))
         data_dict["name"] = name
 
-        if "coordinate" in data_dict.keys():
-            data_dict["coord"] = data_dict.pop("coordinate")    # pointcept convention
+        if "coord" in data_dict.keys():
             data_dict["coord"] = data_dict["coord"].astype(np.float32)
 
         if "color" in data_dict.keys():
