@@ -46,15 +46,11 @@ class WandBWriter(object):
     def add_scalar(self, tag: str, val: float, step: float = None, commit: bool = False):
         if self.wandb:
             self.wandb.log({tag: val}, step=step, commit=commit)
-        # if self.tb_writer:
-        #     self.tb_writer.add_scalar(tag, val, step)
 
     def close(self):
         if self.wandb:
             self.wandb.finish()
-        if self.tb_writer:
-            self.tb_writer.close()
-        
+      
 
 
 

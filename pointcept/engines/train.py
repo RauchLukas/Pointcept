@@ -112,6 +112,9 @@ class TrainerBase:
             h.after_train()
         if comm.is_main_process():
             self.writer.close()
+            self.wandb_writer.close()
+        
+        
 
 
 @TRAINERS.register_module("DefaultTrainer")
