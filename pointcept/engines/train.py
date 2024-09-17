@@ -18,6 +18,7 @@ if sys.version_info >= (3, 10):
 else:
     from collections import Iterator
 from tensorboardX import SummaryWriter
+from pointcept.utils.writer import WandBWriter
 
 from .defaults import create_ddp_model, worker_init_fn
 from .hooks import HookBase, build_hooks
@@ -133,6 +134,8 @@ class Trainer(TrainerBase):
         self.model = self.build_model()
         self.logger.info("=> Building writer ...")
         self.writer = self.build_writer()
+        self.logger.info("=> Building wandb writer ...")
+        self.wandb_writer = self.build_wandb_writer()
         self.logger.info("=> Building train dataset & dataloader ...")
         self.train_loader = self.build_train_loader()
         self.logger.info("=> Building val dataset & dataloader ...")
@@ -234,6 +237,21 @@ class Trainer(TrainerBase):
         writer = SummaryWriter(self.cfg.save_path) if comm.is_main_process() else None
         self.logger.info(f"Tensorboard writer logging dir: {self.cfg.save_path}")
         return writer
+    
+    def build_wandb_writer(self):
+        wandb_writer = (
+            WandBWriter(
+                use_wandb=self.cfg.wandb["use_wandb"],
+                wandb_config=self.cfg,
+                wandb_project=self.cfg.wandb["project"],
+                wandb_entity=self.cfg.wandb["entity"],
+                wandb_group=self.cfg.wandb["group"],
+            )
+            if comm.is_main_process()
+            else None
+        )
+        return wandb_writer
+
 
     def build_train_loader(self):
         train_data = build_dataset(self.cfg.data.train)

@@ -27,6 +27,7 @@ from pointcept.engines.test import TESTERS
 from .default import HookBase
 from .builder import HOOKS
 
+# import wandb
 
 @HOOKS.register_module()
 class IterationTimer(HookBase):
@@ -125,6 +126,16 @@ class InformationWriter(HookBase):
                     self.trainer.storage.history(key).val,
                     self.curr_iter,
                 )
+        if self.trainer.wandb_writer is not None:
+            self.trainer.wandb_writer.add_scalar("lr", lr)
+            for key in self.model_output_keys:
+                self.trainer.wandb_writer.add_scalar(
+                    tag="train_batch/" + key, 
+                    val=self.trainer.storage.history(key).val,
+                    step=self.curr_iter,
+                    commit=True
+                )
+
 
     def after_epoch(self):
         epoch_info = "Train result: "
@@ -140,6 +151,12 @@ class InformationWriter(HookBase):
                     self.trainer.storage.history(key).avg,
                     self.trainer.epoch + 1,
                 )
+        if self.trainer.wandb_writer is not None:
+            for key in self.model_output_keys:
+                self.trainer.wandb_writer.add_scalar(
+                    "train/" + key,  self.trainer.storage.history(key).val, commit=False
+                )
+            self.trainer.wandb_writer.add_scalar("train/epoch", self.trainer.epoch + 1, commit=False)
 
 
 @HOOKS.register_module()

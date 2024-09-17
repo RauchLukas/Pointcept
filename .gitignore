@@ -5,6 +5,7 @@ __pycache__
 **/dist/
 *.so
 exp
+wandb
 weights
 data
 log
