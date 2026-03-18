@@ -76,6 +76,10 @@ class Rohbau3DDataset(DefaultDataset):
             array = array.reshape(reshape)
         if dtype is not None:
             array = array.astype(dtype, copy=False)
+        if not array.flags.writeable:
+            # Pointcept transforms update arrays in-place (e.g. CenterShift).
+            # mmap-backed arrays are read-only, so materialize a writable copy.
+            array = array.copy()
         return array
 
     @staticmethod
