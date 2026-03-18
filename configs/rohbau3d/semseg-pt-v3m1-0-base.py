@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 8  # total batch size across all GPUs
+batch_size = 12  # total batch size across all GPUs
 num_worker = 24
 mix_prob = 0.8
 empty_cache = False
@@ -52,8 +52,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 500
-eval_epoch = 100
+epoch = 10
+eval_epoch = 10
 optimizer = dict(type="AdamW", lr=0.003, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -65,6 +65,7 @@ scheduler = dict(
 )
 
 param_dicts = [dict(keyword="block", lr=0.0006)]
+
 
 # dataset settings
 dataset_type = "Rohbau3DDataset"
@@ -117,15 +118,15 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
             ),
             dict(type="SphereCrop", point_max=102400, mode="random"),
+            # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]), # https://github.com/Pointcept/Pointcept/issues/103
             dict(type="CenterShift", apply_z=False),
             dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
@@ -153,7 +154,7 @@ data = dict(
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -183,7 +184,7 @@ data = dict(
         test_cfg=dict(
             voxelize=dict(
                 type="GridSample",
-                grid_size=0.02,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,
@@ -320,3 +321,4 @@ data = dict(
         ),
     ),
 )
+
