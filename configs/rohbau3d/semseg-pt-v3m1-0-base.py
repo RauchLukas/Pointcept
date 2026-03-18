@@ -99,6 +99,11 @@ data = dict(
         type=dataset_type,
         split="train",
         data_root=data_root,
+        # Performance knobs for large scenes:
+        # - mmap avoids eager full-file copies at load
+        # - keep one scene per worker in RAM to reduce repeated disk IO
+        load_mmap=True,
+        in_memory_cache_num_scenes=1,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(
@@ -142,6 +147,7 @@ data = dict(
         type=dataset_type,
         split="val",
         data_root=data_root,
+        load_mmap=True,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
@@ -168,6 +174,7 @@ data = dict(
         type=dataset_type,
         split="val",
         data_root=data_root,
+        load_mmap=True,
         transform=[
             dict(type="CenterShift", apply_z=True),
             dict(type="NormalizeColor"),

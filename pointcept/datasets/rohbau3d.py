@@ -8,6 +8,7 @@ import os
 import glob
 import numpy as np
 from collections.abc import Sequence
+from collections import OrderedDict
 
 from pointcept.utils.cache import shared_dict
 from .builder import DATASETS
@@ -38,6 +39,52 @@ class Rohbau3DDataset(DefaultDataset):
     ]
     NUM_CLASSES = 18
 
+    def __init__(
+        self,
+        split="train",
+        data_root="data/dataset",
+        transform=None,
+        test_mode=False,
+        test_cfg=None,
+        cache=False,
+        ignore_index=-1,
+        loop=1,
+        load_mmap=True,
+        in_memory_cache_num_scenes=0,
+    ):
+        self.load_mmap = load_mmap
+        self.in_memory_cache_num_scenes = int(max(0, in_memory_cache_num_scenes))
+        self._scene_cache = OrderedDict()
+        super().__init__(
+            split=split,
+            data_root=data_root,
+            transform=transform,
+            test_mode=test_mode,
+            test_cfg=test_cfg,
+            cache=cache,
+            ignore_index=ignore_index,
+            loop=loop,
+        )
+
+    def _load_npy(self, path, dtype=None, reshape=None):
+        array = np.load(
+            path,
+            mmap_mode="r" if self.load_mmap else None,
+            allow_pickle=False,
+        )
+        if reshape is not None:
+            array = array.reshape(reshape)
+        if dtype is not None:
+            array = array.astype(dtype, copy=False)
+        return array
+
+    @staticmethod
+    def _clone_data_dict(data_dict):
+        cloned = {}
+        for key, value in data_dict.items():
+            cloned[key] = value.copy() if isinstance(value, np.ndarray) else value
+        return cloned
+
     def get_data_list(self):
         if isinstance(self.split, str):
             split_list = [self.split]
@@ -66,37 +113,43 @@ class Rohbau3DDataset(DefaultDataset):
             cache_name = f"pointcept-{name}"
             return shared_dict(cache_name)
 
+        if self.in_memory_cache_num_scenes > 0 and scene_dir in self._scene_cache:
+            self._scene_cache.move_to_end(scene_dir)
+            return self._clone_data_dict(self._scene_cache[scene_dir])
+
         data_dict = dict(name=name, split=split)
 
         coord_path = os.path.join(scene_dir, "coord.npy")
         if not os.path.exists(coord_path):
             raise FileNotFoundError(f"coord.npy not found in: {scene_dir}")
-        coord = np.load(coord_path).astype(np.float32)
+        coord = self._load_npy(coord_path, dtype=np.float32)
         data_dict["coord"] = coord
         num_point = coord.shape[0]
 
         color_path = os.path.join(scene_dir, "color.npy")
         if os.path.exists(color_path):
-            data_dict["color"] = np.load(color_path).astype(np.float32)
+            data_dict["color"] = self._load_npy(color_path, dtype=np.float32)
         else:
             data_dict["color"] = np.zeros((num_point, 3), dtype=np.float32)
 
         normal_path = os.path.join(scene_dir, "normal.npy")
         if os.path.exists(normal_path):
-            data_dict["normal"] = np.load(normal_path).astype(np.float32)
+            data_dict["normal"] = self._load_npy(normal_path, dtype=np.float32)
         else:
             data_dict["normal"] = np.zeros((num_point, 3), dtype=np.float32)
 
         intensity_path = os.path.join(scene_dir, "intensity.npy")
         if os.path.exists(intensity_path):
-            intensity = np.load(intensity_path).reshape([-1, 1]).astype(np.float32)
+            intensity = self._load_npy(
+                intensity_path, dtype=np.float32, reshape=(-1, 1)
+            )
             data_dict["strength"] = intensity
         else:
             data_dict["strength"] = np.zeros((num_point, 1), dtype=np.float32)
 
         class_path = os.path.join(scene_dir, "class.npy")
         if os.path.exists(class_path):
-            segment = np.load(class_path).reshape([-1]).astype(np.int32)
+            segment = self._load_npy(class_path, dtype=np.int32, reshape=(-1,))
             if np.any((segment < 0) | (segment >= self.NUM_CLASSES)):
                 raise ValueError(
                     f"Invalid class index in {class_path}, expected [0, {self.NUM_CLASSES - 1}]"
@@ -109,8 +162,15 @@ class Rohbau3DDataset(DefaultDataset):
         if not os.path.exists(instance_path):
             instance_path = os.path.join(scene_dir, "segment.npy")
         if os.path.exists(instance_path):
-            instance = np.load(instance_path).reshape([-1]).astype(np.int32)
+            instance = self._load_npy(instance_path, dtype=np.int32, reshape=(-1,))
         else:
             instance = np.ones(num_point, dtype=np.int32) * -1
         data_dict["instance"] = instance
+
+        if self.in_memory_cache_num_scenes > 0:
+            self._scene_cache[scene_dir] = data_dict
+            self._scene_cache.move_to_end(scene_dir)
+            while len(self._scene_cache) > self.in_memory_cache_num_scenes:
+                self._scene_cache.popitem(last=False)
+            return self._clone_data_dict(data_dict)
         return data_dict
