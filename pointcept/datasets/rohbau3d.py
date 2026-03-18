@@ -114,9 +114,3 @@ class Rohbau3DDataset(DefaultDataset):
             instance = np.ones(num_point, dtype=np.int32) * -1
         data_dict["instance"] = instance
         return data_dict
-
-
-@DATASETS.register_module()
-class Rohbauu3DDataset(Rohbau3DDataset):
-    """Alias for typo-safe config compatibility."""
-
