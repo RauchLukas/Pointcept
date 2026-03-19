@@ -20,9 +20,6 @@ from pointcept.utils.registry import Registry
 
 TRANSFORMS = Registry("transforms")
 
-<<<<<<< Updated upstream
-from time import time
-=======
 try:
     from numba import njit
 
@@ -111,7 +108,6 @@ try:
     _HAS_NUMBA = True
 except ImportError:
     _HAS_NUMBA = False
->>>>>>> Stashed changes
 
 
 def index_operator(data_dict, index, duplicate=False):
@@ -1095,41 +1091,6 @@ class GridSample(object):
 
         min_coord = grid_coord.min(axis=0)
         grid_coord -= min_coord
-<<<<<<< Updated upstream
-        scaled_coord = scaled_coord - min_coord
-        min_coord_metric = min_coord * self.grid_size_arr
-
-        key = self.hash(grid_coord)
-
-        # default quicksort is usually fastest for numeric arrays
-        idx_sort = np.argsort(key)
-        key_sort = key[idx_sort]
-
-        # group by sorted key
-        _, inverse, count = np.unique(
-            key_sort, return_inverse=True, return_counts=True
-        )
-
-        # group start offsets once
-        start = np.empty_like(count)
-        start[0] = 0
-        if count.size > 1:
-            np.cumsum(count[:-1], out=start[1:])
-
-        # build inverse map once if needed
-        inverse_map = None
-        if self.return_inverse:
-            inverse_map = np.empty_like(inverse)
-            inverse_map[idx_sort] = inverse
-
-        # build displacement once if needed
-        displacement = None
-        if self.return_displacement:
-            displacement = scaled_coord - grid_coord - 0.5
-            if self.project_displacement:
-                displacement = np.sum(
-                    displacement * data_dict["normal"], axis=-1, keepdims=True
-=======
         scaled_coord -= min_coord
         min_coord = min_coord * np.array(self.grid_size)
 
@@ -1156,7 +1117,6 @@ class GridSample(object):
             if "sampled_index" in data_dict:
                 idx_unique = np.unique(
                     np.append(idx_unique, data_dict["sampled_index"])
->>>>>>> Stashed changes
                 )
 
         if self.mode == "train":
@@ -1176,12 +1136,7 @@ class GridSample(object):
             data_dict = index_operator(data_dict, idx_unique)
 
             if self.return_inverse:
-<<<<<<< Updated upstream
-                data_dict["inverse"] = inverse_map
-
-=======
                 data_dict["inverse"] = inverse
->>>>>>> Stashed changes
             if self.return_grid_coord:
                 data_dict["grid_coord"] = grid_coord[idx_unique]
                 if "grid_coord" not in data_dict["index_valid_keys"]:
@@ -1199,8 +1154,6 @@ class GridSample(object):
             return data_dict
 
         elif self.mode == "test":
-<<<<<<< Updated upstream
-=======
             # Test mode needs sorted grouping to enumerate all points per voxel
             key = self.hash(grid_coord)
             idx_sort = np.argsort(key)
@@ -1208,7 +1161,6 @@ class GridSample(object):
             _, inverse, count = np.unique(
                 key_sort, return_inverse=True, return_counts=True
             )
->>>>>>> Stashed changes
             data_part_list = []
             count_max = int(count.max())
 
