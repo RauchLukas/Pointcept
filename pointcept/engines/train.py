@@ -309,6 +309,7 @@ class Trainer(TrainerBase):
             worker_init_fn=init_fn,
             drop_last=len(train_data) > self.cfg.batch_size,
             persistent_workers=True,
+            prefetch_factor=getattr(self.cfg, "prefetch_factor", 4),
         )
         return train_loader
 
