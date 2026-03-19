@@ -21,93 +21,107 @@ from pointcept.utils.registry import Registry
 TRANSFORMS = Registry("transforms")
 
 try:
+    import numba
     from numba import njit
+    from numba.typed import Dict as NumbaDict
+    from numba.core import types as numba_types
 
     @njit(cache=True)
-    def _numba_grid_sample(grid_coord):
-        """O(N) voxel sampling via open-addressing hash table + reservoir sampling.
-
-        Returns (idx_unique, inverse, count) without any sorting.
-        """
+    def _numba_ravel_hash(grid_coord):
+        """Compute ravel hash for non-negative integer coords. O(N)."""
         n = grid_coord.shape[0]
-
-        gc_min0 = grid_coord[0, 0]
-        gc_min1 = grid_coord[0, 1]
-        gc_min2 = grid_coord[0, 2]
-        gc_max0 = gc_min0
-        gc_max1 = gc_min1
-        gc_max2 = gc_min2
-        for i in range(1, n):
-            v0, v1, v2 = grid_coord[i, 0], grid_coord[i, 1], grid_coord[i, 2]
-            if v0 < gc_min0:
-                gc_min0 = v0
-            if v0 > gc_max0:
-                gc_max0 = v0
-            if v1 < gc_min1:
-                gc_min1 = v1
-            if v1 > gc_max1:
-                gc_max1 = v1
-            if v2 < gc_min2:
-                gc_min2 = v2
-            if v2 > gc_max2:
-                gc_max2 = v2
-
-        d1 = np.int64(gc_max1 - gc_min1 + 1)
-        d2 = np.int64(gc_max2 - gc_min2 + 1)
-
-        table_bits = 1
-        while (1 << table_bits) < 2 * n:
-            table_bits += 1
-        table_size = 1 << table_bits
-        table_mask = np.int64(table_size - 1)
-
-        EMPTY = np.int64(-9223372036854775807 - 1)
-        ht_key = np.full(table_size, EMPTY, dtype=np.int64)
-        ht_vid = np.empty(table_size, dtype=np.int64)
-        ht_sel = np.empty(table_size, dtype=np.int64)
-        ht_cnt = np.empty(table_size, dtype=np.int64)
-
-        n_voxels = np.int64(0)
-        inverse = np.empty(n, dtype=np.int64)
-
+        d = grid_coord.shape[1]
+        arr_max = np.empty(d, dtype=np.int64)
+        for j in range(d):
+            m = np.int64(0)
+            for i in range(n):
+                if grid_coord[i, j] > m:
+                    m = grid_coord[i, j]
+            arr_max[j] = m + 1
+        keys = np.empty(n, dtype=np.int64)
         for i in range(n):
-            key = (
-                np.int64(grid_coord[i, 0] - gc_min0) * d1
-                + np.int64(grid_coord[i, 1] - gc_min1)
-            ) * d2 + np.int64(grid_coord[i, 2] - gc_min2)
+            k = np.int64(0)
+            for j in range(d - 1):
+                k = (k + grid_coord[i, j]) * arr_max[j + 1]
+            k += grid_coord[i, d - 1]
+            keys[i] = k
+        return keys
 
-            slot = (key * np.int64(2654435761)) & table_mask
-            while True:
-                if ht_key[slot] == key:
-                    ht_cnt[slot] += 1
-                    if np.random.randint(0, ht_cnt[slot]) == 0:
-                        ht_sel[slot] = np.int64(i)
-                    inverse[i] = ht_vid[slot]
-                    break
-                elif ht_key[slot] == EMPTY:
-                    ht_key[slot] = key
-                    ht_vid[slot] = n_voxels
-                    ht_sel[slot] = np.int64(i)
-                    ht_cnt[slot] = np.int64(1)
-                    inverse[i] = n_voxels
-                    n_voxels += 1
-                    break
-                else:
-                    slot = (slot + 1) & table_mask
+    @njit(cache=True)
+    def _numba_voxel_sample_train(keys, n):
+        """O(N) reservoir sampling: pick one random point per voxel."""
+        selected = NumbaDict.empty(
+            key_type=numba_types.int64,
+            value_type=numba_types.int64,
+        )
+        counts = NumbaDict.empty(
+            key_type=numba_types.int64,
+            value_type=numba_types.int64,
+        )
+        for i in range(n):
+            k = keys[i]
+            if k not in selected:
+                selected[k] = i
+                counts[k] = np.int64(1)
+            else:
+                counts[k] += np.int64(1)
+                if np.random.randint(0, counts[k]) == 0:
+                    selected[k] = i
 
+        n_voxels = len(selected)
         idx_unique = np.empty(n_voxels, dtype=np.int64)
-        count = np.empty(n_voxels, dtype=np.int64)
-        for slot in range(table_size):
-            if ht_key[slot] != EMPTY:
-                vid = ht_vid[slot]
-                idx_unique[vid] = ht_sel[slot]
-                count[vid] = ht_cnt[slot]
+        j = np.int64(0)
+        for k in selected:
+            idx_unique[j] = selected[k]
+            j += 1
+        return idx_unique
 
-        return idx_unique, inverse, count
+    @njit(cache=True)
+    def _numba_voxel_group(keys, n):
+        """O(N) voxel grouping: returns idx_sort, inverse, count via hashmap."""
+        voxel_id = NumbaDict.empty(
+            key_type=numba_types.int64,
+            value_type=numba_types.int64,
+        )
+        point_voxel = np.empty(n, dtype=np.int64)
+        n_voxels = np.int64(0)
+        for i in range(n):
+            k = keys[i]
+            if k not in voxel_id:
+                voxel_id[k] = n_voxels
+                n_voxels += np.int64(1)
+            point_voxel[i] = voxel_id[k]
 
-    _HAS_NUMBA = True
+        count = np.zeros(n_voxels, dtype=np.int64)
+        for i in range(n):
+            count[point_voxel[i]] += np.int64(1)
+
+        offsets = np.empty(n_voxels + 1, dtype=np.int64)
+        offsets[0] = np.int64(0)
+        for v in range(n_voxels):
+            offsets[v + 1] = offsets[v] + count[v]
+
+        idx_sort = np.empty(n, dtype=np.int64)
+        fill = np.zeros(n_voxels, dtype=np.int64)
+        for i in range(n):
+            v = point_voxel[i]
+            idx_sort[offsets[v] + fill[v]] = i
+            fill[v] += np.int64(1)
+
+        inverse = np.empty(n, dtype=np.int64)
+        for i in range(n):
+            inverse[idx_sort[i]] = np.int64(0)
+        pos = np.int64(0)
+        for v in range(n_voxels):
+            for j in range(count[v]):
+                inverse[idx_sort[offsets[v] + j]] = pos
+            pos += np.int64(1)
+
+        return idx_sort, inverse, count
+
+    NUMBA_AVAILABLE = True
 except ImportError:
-    _HAS_NUMBA = False
+    NUMBA_AVAILABLE = False
 
 
 def index_operator(data_dict, index, duplicate=False):
@@ -884,7 +898,6 @@ class ElasticDistortion(object):
         granularity: size of the noise grid (in same scale[m/cm] as the voxel grid)
         magnitude: noise multiplier
         """
-
         blurx = np.ones((3, 1, 1, 1)).astype("float32") / 3
         blury = np.ones((1, 3, 1, 1)).astype("float32") / 3
         blurz = np.ones((1, 1, 3, 1)).astype("float32") / 3
@@ -922,128 +935,13 @@ class ElasticDistortion(object):
         return coords
 
     def __call__(self, data_dict):
-        # t0 = time() # DEBUG ToDo remove
         if "coord" in data_dict.keys() and self.distortion_params is not None:
             if random.random() < 0.95:
                 for granularity, magnitude in self.distortion_params:
                     data_dict["coord"] = self.elastic_distortion(
                         data_dict["coord"], granularity, magnitude
                     )
-        # print(f"[DEBUG] ElasticDistortion Time: {time() - t0:.4f} sec") # DEBUG ToDo remove
         return data_dict
-
-
-# @TRANSFORMS.register_module()
-# class GridSample(object):
-#     def __init__(
-#         self,
-#         grid_size=0.05,
-#         hash_type="fnv",
-#         mode="train",
-#         return_inverse=False,
-#         return_grid_coord=False,
-#         return_min_coord=False,
-#         return_displacement=False,
-#         project_displacement=False,
-#     ):
-#         self.grid_size = grid_size
-#         self.hash = self.fnv_hash_vec if hash_type == "fnv" else self.ravel_hash_vec
-#         assert mode in ["train", "test"]
-#         self.mode = mode
-#         self.return_inverse = return_inverse
-#         self.return_grid_coord = return_grid_coord
-#         self.return_min_coord = return_min_coord
-#         self.return_displacement = return_displacement
-#         self.project_displacement = project_displacement
-
-#     def __call__(self, data_dict):
-#         assert "coord" in data_dict.keys()
-#         t0 = time() # DEBUG ToDo remove
-#         scaled_coord = data_dict["coord"] / np.array(self.grid_size)
-#         grid_coord = np.floor(scaled_coord).astype(int)
-#         min_coord = grid_coord.min(0)
-#         grid_coord -= min_coord
-#         scaled_coord -= min_coord
-#         min_coord = min_coord * np.array(self.grid_size)
-#         key = self.hash(grid_coord)
-#         idx_sort = np.argsort(key)
-#         key_sort = key[idx_sort]
-#         _, inverse, count = np.unique(key_sort, return_inverse=True, return_counts=True)
-#         if self.mode == "train":  # train mode
-#             idx_select = (
-#                 np.cumsum(np.insert(count, 0, 0)[0:-1])
-#                 + np.random.randint(0, count.max(), count.size) % count
-#             )
-#             idx_unique = idx_sort[idx_select]
-#             if "sampled_index" in data_dict:
-#                 # for ScanNet data efficient, we need to make sure labeled point is sampled.
-#                 idx_unique = np.unique(
-#                     np.append(idx_unique, data_dict["sampled_index"])
-#                 )
-#                 mask = np.zeros_like(data_dict["segment"]).astype(bool)
-#                 mask[data_dict["sampled_index"]] = True
-#                 data_dict["sampled_index"] = np.where(mask[idx_unique])[0]
-#             data_dict = index_operator(data_dict, idx_unique)
-#             if self.return_inverse:
-#                 data_dict["inverse"] = np.zeros_like(inverse)
-#                 data_dict["inverse"][idx_sort] = inverse
-#             if self.return_grid_coord:
-#                 data_dict["grid_coord"] = grid_coord[idx_unique]
-#                 if "grid_coord" not in data_dict["index_valid_keys"]:
-#                     data_dict["index_valid_keys"].append("grid_coord")
-#             if self.return_min_coord:
-#                 data_dict["min_coord"] = min_coord.reshape([1, 3])
-#             if self.return_displacement:
-#                 displacement = (
-#                     scaled_coord - grid_coord - 0.5
-#                 )  # [0, 1] -> [-0.5, 0.5] displacement to center
-#                 if self.project_displacement:
-#                     displacement = np.sum(
-#                         displacement * data_dict["normal"], axis=-1, keepdims=True
-#                     )
-#                 data_dict["displacement"] = displacement[idx_unique]
-#                 if "displacement" not in data_dict["index_valid_keys"]:
-#                     data_dict["index_valid_keys"].append("displacement")
-#             print(f"[DEBUG] GridSample Time: {time() - t0:.4f} sec") # DEBUG ToDo remove
-#             return data_dict
-
-#         elif self.mode == "test":  # test mode
-#             data_part_list = []
-#             for i in range(count.max()):
-#                 idx_select = np.cumsum(np.insert(count, 0, 0)[0:-1]) + i % count
-#                 idx_part = idx_sort[idx_select]
-#                 data_part = index_operator(data_dict, idx_part, duplicate=True)
-#                 data_part["index"] = idx_part
-#                 if self.return_inverse:
-#                     data_part["inverse"] = np.zeros_like(inverse)
-#                     data_part["inverse"][idx_sort] = inverse
-#                 if self.return_grid_coord:
-#                     data_part["grid_coord"] = grid_coord[idx_part]
-#                     if "grid_coord" not in data_part["index_valid_keys"]:
-#                         data_part["index_valid_keys"].append("grid_coord")
-#                 if self.return_min_coord:
-#                     data_part["min_coord"] = min_coord.reshape([1, 3])
-#                 if self.return_displacement:
-#                     displacement = (
-#                         scaled_coord - grid_coord - 0.5
-#                     )  # [0, 1] -> [-0.5, 0.5] displacement to center
-#                     if self.project_displacement:
-#                         displacement = np.sum(
-#                             displacement * data_dict["normal"], axis=-1, keepdims=True
-#                         )
-#                     data_part["displacement"] = displacement[idx_part]
-#                     if "displacement" not in data_part["index_valid_keys"]:
-#                         data_part["index_valid_keys"].append("displacement")
-#                 data_part_list.append(data_part)
-#             print(f"[DEBUG] GridSample Time: {time() - t0:.4f} sec") # DEBUG ToDo remove
-#             return data_part_list
-#         else:
-#             raise NotImplementedError
-
-
-
-import numpy as np
-from time import time
 
 @TRANSFORMS.register_module()
 class GridSample(object):
@@ -1057,8 +955,9 @@ class GridSample(object):
         return_min_coord=False,
         return_displacement=False,
         project_displacement=False,
-        use_numba=True,
     ):
+        self.grid_size = grid_size
+        self.hash = self.fnv_hash_vec if hash_type == "fnv" else self.ravel_hash_vec
         assert mode in ["train", "test"]
         self.mode = mode
         self.return_inverse = return_inverse
@@ -1066,149 +965,237 @@ class GridSample(object):
         self.return_min_coord = return_min_coord
         self.return_displacement = return_displacement
         self.project_displacement = project_displacement
-        self.use_numba = use_numba and _HAS_NUMBA
+        self._use_numba = NUMBA_AVAILABLE
+        self._numba_warmed_up = False
 
-        # Avoid rebuilding these every call
-        self.grid_size = grid_size
-        self.grid_size_arr = np.asarray(grid_size, dtype=np.float32)
-        self.inv_grid_size_arr = 1.0 / self.grid_size_arr
-
-        self.hash = self.fnv_hash_vec if hash_type == "fnv" else self.ravel_hash_vec
-
-        # Faster modern RNG
-        self.rng = np.random.default_rng()
+    def _warmup_numba(self):
+        if self._numba_warmed_up:
+            return
+        dummy = np.zeros((4, 3), dtype=np.int64)
+        keys = _numba_ravel_hash(dummy)
+        _numba_voxel_sample_train(keys, 4)
+        _numba_voxel_group(keys, 4)
+        self._numba_warmed_up = True
 
     def __call__(self, data_dict):
-        assert "coord" in data_dict
-
-        # t0 = time()  # debug only
-
-        coord = data_dict["coord"]
-
-        # Multiply is usually a bit better than divide, and reuse precomputed arrays
-        scaled_coord = coord * self.inv_grid_size_arr
-        grid_coord = np.floor(scaled_coord).astype(np.int64, copy=False)
-
-        min_coord = grid_coord.min(axis=0)
+        assert "coord" in data_dict.keys()
+        t0 = time() # DEBUG ToDo remove
+        scaled_coord = data_dict["coord"] / np.array(self.grid_size)
+        grid_coord = np.floor(scaled_coord).astype(int)
+        min_coord = grid_coord.min(0)
         grid_coord -= min_coord
         scaled_coord -= min_coord
         min_coord = min_coord * np.array(self.grid_size)
 
+        if self._use_numba:
+            return self._call_numba(data_dict, grid_coord, scaled_coord, min_coord)
+        return self._call_numpy(data_dict, grid_coord, scaled_coord, min_coord)
+
+    def _call_numba(self, data_dict, grid_coord, scaled_coord, min_coord):
+        """O(N) path using numba JIT-compiled hashmap operations."""
+        self._warmup_numba()
+        gc_i64 = grid_coord.astype(np.int64)
+        keys = _numba_ravel_hash(gc_i64)
+        n = len(keys)
+
         if self.mode == "train":
-            if self.use_numba:
-                # O(N) path: hash-table grouping + reservoir sampling, no sort
-                idx_unique, inverse, count = _numba_grid_sample(
-                    grid_coord.astype(np.int64)
-                )
+            needs_group = (
+                self.return_inverse or "sampled_index" in data_dict
+            )
+            if not needs_group:
+                idx_unique = _numba_voxel_sample_train(keys, n)
+                data_dict = index_operator(data_dict, idx_unique)
             else:
-                key = self.hash(grid_coord)
-                # np.unique sorts internally; the scatter below replaces the
-                # explicit argsort->gather->cumsum chain with a single O(N) pass.
-                _, inverse, count = np.unique(
-                    key, return_inverse=True, return_counts=True
+                idx_sort, inverse, count = _numba_voxel_group(keys, n)
+                idx_select = (
+                    np.cumsum(np.insert(count, 0, 0)[0:-1])
+                    + np.random.randint(0, count.max(), count.size) % count
                 )
-                n_voxels = len(count)
-                # "Last-writer-wins" with random permutation: each point in a
-                # voxel of size k has uniform 1/k probability of being selected.
-                perm = np.random.permutation(len(key))
-                idx_unique = np.empty(n_voxels, dtype=np.intp)
-                idx_unique[inverse[perm]] = perm
+                idx_unique = idx_sort[idx_select]
+                if "sampled_index" in data_dict:
+                    idx_unique = np.unique(
+                        np.append(idx_unique, data_dict["sampled_index"])
+                    )
+                    mask = np.zeros_like(data_dict["segment"]).astype(bool)
+                    mask[data_dict["sampled_index"]] = True
+                    data_dict["sampled_index"] = np.where(mask[idx_unique])[0]
+                data_dict = index_operator(data_dict, idx_unique)
+                if self.return_inverse:
+                    data_dict["inverse"] = np.zeros_like(inverse)
+                    data_dict["inverse"][idx_sort] = inverse
 
-            if "sampled_index" in data_dict:
-                idx_unique = np.unique(
-                    np.append(idx_unique, data_dict["sampled_index"])
-                )
-
-        if self.mode == "train":
-            # sample directly inside each voxel group
-            rand_offset = self.rng.integers(0, count, size=count.shape, endpoint=False)
-            idx_select = start + rand_offset
-            idx_unique = idx_sort[idx_select]
-
-            if "sampled_index" in data_dict:
-                sampled_index = data_dict["sampled_index"]
-                idx_unique = np.unique(np.concatenate((idx_unique, sampled_index)))
-
-                mask = np.zeros(data_dict["segment"].shape, dtype=bool)
-                mask[sampled_index] = True
-                data_dict["sampled_index"] = np.nonzero(mask[idx_unique])[0]
-
-            data_dict = index_operator(data_dict, idx_unique)
-
-            if self.return_inverse:
-                data_dict["inverse"] = inverse
             if self.return_grid_coord:
                 data_dict["grid_coord"] = grid_coord[idx_unique]
                 if "grid_coord" not in data_dict["index_valid_keys"]:
                     data_dict["index_valid_keys"].append("grid_coord")
-
             if self.return_min_coord:
-                data_dict["min_coord"] = min_coord_metric.reshape(1, 3)
-
+                data_dict["min_coord"] = min_coord.reshape([1, 3])
             if self.return_displacement:
+                displacement = scaled_coord - grid_coord - 0.5
+                if self.project_displacement:
+                    displacement = np.sum(
+                        displacement * data_dict["normal"], axis=-1, keepdims=True
+                    )
                 data_dict["displacement"] = displacement[idx_unique]
                 if "displacement" not in data_dict["index_valid_keys"]:
                     data_dict["index_valid_keys"].append("displacement")
-
-            # print(f"[DEBUG] GridSample Time: {time() - t0:.4f} sec")
             return data_dict
 
         elif self.mode == "test":
-            # Test mode needs sorted grouping to enumerate all points per voxel
-            key = self.hash(grid_coord)
-            idx_sort = np.argsort(key)
-            key_sort = key[idx_sort]
-            _, inverse, count = np.unique(
-                key_sort, return_inverse=True, return_counts=True
-            )
+            idx_sort, inverse, count = _numba_voxel_group(keys, n)
             data_part_list = []
-            count_max = int(count.max())
-
-            for i in range(count_max):
-                idx_select = start + (i % count)
+            offsets = np.cumsum(np.insert(count, 0, 0)[0:-1])
+            for i in range(count.max()):
+                idx_select = offsets + i % count
                 idx_part = idx_sort[idx_select]
-
                 data_part = index_operator(data_dict, idx_part, duplicate=True)
                 data_part["index"] = idx_part
-
                 if self.return_inverse:
-                    data_part["inverse"] = inverse_map
-
+                    data_part["inverse"] = np.zeros_like(inverse)
+                    data_part["inverse"][idx_sort] = inverse
                 if self.return_grid_coord:
                     data_part["grid_coord"] = grid_coord[idx_part]
                     if "grid_coord" not in data_part["index_valid_keys"]:
                         data_part["index_valid_keys"].append("grid_coord")
-
                 if self.return_min_coord:
-                    data_part["min_coord"] = min_coord_metric.reshape(1, 3)
-
+                    data_part["min_coord"] = min_coord.reshape([1, 3])
                 if self.return_displacement:
+                    displacement = scaled_coord - grid_coord - 0.5
+                    if self.project_displacement:
+                        displacement = np.sum(
+                            displacement * data_dict["normal"], axis=-1, keepdims=True
+                        )
                     data_part["displacement"] = displacement[idx_part]
                     if "displacement" not in data_part["index_valid_keys"]:
                         data_part["index_valid_keys"].append("displacement")
-
                 data_part_list.append(data_part)
-
-            # print(f"[DEBUG] GridSample Time: {time() - t0:.4f} sec")
             return data_part_list
+        else:
+            raise NotImplementedError
 
+    def _call_numpy(self, data_dict, grid_coord, scaled_coord, min_coord):
+        """Optimized NumPy fallback (no numba). Uses inlined ravel hash,
+        single np.unique call, and avoids redundant copies."""
+        key = self._fast_ravel_hash(grid_coord)
+        idx_sort = np.argsort(key)
+        key_sort = key[idx_sort]
+        _, inverse, count = np.unique(
+            key_sort, return_inverse=True, return_counts=True
+        )
+        if self.mode == "train":
+            idx_select = (
+                np.cumsum(np.insert(count, 0, 0)[0:-1])
+                + np.random.randint(0, count.max(), count.size) % count
+            )
+            idx_unique = idx_sort[idx_select]
+            if "sampled_index" in data_dict:
+                idx_unique = np.unique(
+                    np.append(idx_unique, data_dict["sampled_index"])
+                )
+                mask = np.zeros_like(data_dict["segment"]).astype(bool)
+                mask[data_dict["sampled_index"]] = True
+                data_dict["sampled_index"] = np.where(mask[idx_unique])[0]
+            data_dict = index_operator(data_dict, idx_unique)
+            if self.return_inverse:
+                data_dict["inverse"] = np.zeros_like(inverse)
+                data_dict["inverse"][idx_sort] = inverse
+            if self.return_grid_coord:
+                data_dict["grid_coord"] = grid_coord[idx_unique]
+                if "grid_coord" not in data_dict["index_valid_keys"]:
+                    data_dict["index_valid_keys"].append("grid_coord")
+            if self.return_min_coord:
+                data_dict["min_coord"] = min_coord.reshape([1, 3])
+            if self.return_displacement:
+                displacement = (
+                    scaled_coord - grid_coord - 0.5
+                )
+                if self.project_displacement:
+                    displacement = np.sum(
+                        displacement * data_dict["normal"], axis=-1, keepdims=True
+                    )
+                data_dict["displacement"] = displacement[idx_unique]
+                if "displacement" not in data_dict["index_valid_keys"]:
+                    data_dict["index_valid_keys"].append("displacement")
+            print(f"[DEBUG] GridSample Time: {time() - t0:.4f} sec") # DEBUG ToDo remove
+            return data_dict
+
+        elif self.mode == "test":
+            data_part_list = []
+            offsets = np.cumsum(np.insert(count, 0, 0)[0:-1])
+            for i in range(count.max()):
+                idx_select = offsets + i % count
+                idx_part = idx_sort[idx_select]
+                data_part = index_operator(data_dict, idx_part, duplicate=True)
+                data_part["index"] = idx_part
+                if self.return_inverse:
+                    data_part["inverse"] = np.zeros_like(inverse)
+                    data_part["inverse"][idx_sort] = inverse
+                if self.return_grid_coord:
+                    data_part["grid_coord"] = grid_coord[idx_part]
+                    if "grid_coord" not in data_part["index_valid_keys"]:
+                        data_part["index_valid_keys"].append("grid_coord")
+                if self.return_min_coord:
+                    data_part["min_coord"] = min_coord.reshape([1, 3])
+                if self.return_displacement:
+                    displacement = (
+                        scaled_coord - grid_coord - 0.5
+                    )
+                    if self.project_displacement:
+                        displacement = np.sum(
+                            displacement * data_dict["normal"], axis=-1, keepdims=True
+                        )
+                    data_part["displacement"] = displacement[idx_part]
+                    if "displacement" not in data_part["index_valid_keys"]:
+                        data_part["index_valid_keys"].append("displacement")
+                data_part_list.append(data_part)
+            print(f"[DEBUG] GridSample Time: {time() - t0:.4f} sec") # DEBUG ToDo remove
+            return data_part_list
         else:
             raise NotImplementedError
 
 
+
+    @staticmethod
+    def _fast_ravel_hash(arr):
+        """Ravel hash without redundant copy/min-subtraction.
+        Assumes arr is already non-negative (min already subtracted by caller)."""
+        arr = arr.astype(np.uint64, copy=False)
+        arr_max = arr.max(0).astype(np.uint64) + 1
+        keys = np.zeros(arr.shape[0], dtype=np.uint64)
+        for j in range(arr.shape[1] - 1):
+            keys += arr[:, j]
+            keys *= arr_max[j + 1]
+        keys += arr[:, -1]
+        return keys
+
     @staticmethod
     def ravel_hash_vec(arr):
-        """Collision-free ravel hash using np.ravel_multi_index (C impl)."""
+        """
+        Ravel the coordinates after subtracting the min coordinates.
+        """
         assert arr.ndim == 2
-        arr = arr - arr.min(0)  # new array, no copy needed
-        dims = tuple((arr.max(0) + 1).astype(np.int64))
-        return np.ravel_multi_index(arr.astype(np.int64).T, dims)
+        arr = arr.copy()
+        arr -= arr.min(0)
+        arr = arr.astype(np.uint64, copy=False)
+        arr_max = arr.max(0).astype(np.uint64) + 1
+
+        keys = np.zeros(arr.shape[0], dtype=np.uint64)
+        # Fortran style indexing
+        for j in range(arr.shape[1] - 1):
+            keys += arr[:, j]
+            keys *= arr_max[j + 1]
+        keys += arr[:, -1]
+        return keys
 
     @staticmethod
     def fnv_hash_vec(arr):
-        """FNV64-1A — vectorized, no unnecessary copy."""
+        """
+        FNV64-1A
+        """
         assert arr.ndim == 2
-        arr = arr.astype(np.uint64)
+        # Floor first for negative coordinates
+        arr = arr.copy()
+        arr = arr.astype(np.uint64, copy=False)
         hashed_arr = np.uint64(14695981039346656037) * np.ones(
             arr.shape[0], dtype=np.uint64
         )
@@ -1227,7 +1214,6 @@ class SphereCrop(object):
         self.mode = mode
 
     def __call__(self, data_dict):
-        # t0 = time() # DEBUB ToDo remove
         point_max = (
             int(self.sample_rate * data_dict["coord"].shape[0])
             if self.sample_rate is not None
@@ -1262,7 +1248,6 @@ class SphereCrop(object):
                 :point_max
             ]
             data_dict = index_operator(data_dict, idx_crop)
-        # print(f"[DEBUG] SphereCrop Time: {time() - t0:.4f} sec") # DEBUG ToDo remove
         return data_dict
 
 
