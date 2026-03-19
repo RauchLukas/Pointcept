@@ -5,6 +5,7 @@ Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com), Yujia Zhang (yujia.zhang.cs@gmai
 Please cite our work if the code is helpful to you.
 """
 
+import os
 import random
 import numbers
 import scipy
@@ -981,6 +982,306 @@ class GridSample(object):
             hashed_arr *= np.uint64(1099511628211)
             hashed_arr = np.bitwise_xor(hashed_arr, arr[:, j])
         return hashed_arr
+
+
+@TRANSFORMS.register_module()
+class CachedGridSample(object):
+    """Grid sampling with disk-cached voxel structure.
+
+    Caches the expensive hash / argsort / unique computation to
+    ``<scene_dir>/grid_cache_<grid_size>/``.  On cache hit only the cheap
+    random within-voxel point selection runs at each epoch.
+
+    **Pipeline placement** (train): put right after ``CenterShift(apply_z=True)``
+    and *before* random augmentations so that (a) coordinates are deterministic
+    and the cache is reusable, and (b) augmentations run on the smaller,
+    downsampled cloud.  Pair with ``GridCoord`` after augmentations to get
+    integer grid coordinates that reflect the augmented geometry.
+
+    Falls back to full on-the-fly computation when ``scene_dir`` is absent from
+    *data_dict* or the cache has not yet been built (auto-builds on first access).
+
+    Requires ``data_dict["scene_dir"]`` – set by ``Rohbau3DDataset``.
+    """
+
+    def __init__(
+        self,
+        grid_size=0.05,
+        hash_type="fnv",
+        mode="train",
+        return_inverse=False,
+        return_grid_coord=False,
+        return_min_coord=False,
+        return_displacement=False,
+        project_displacement=False,
+    ):
+        self.grid_size = grid_size
+        self.hash = (
+            GridSample.fnv_hash_vec if hash_type == "fnv" else GridSample.ravel_hash_vec
+        )
+        assert mode in ["train", "test"]
+        self.mode = mode
+        self.return_inverse = return_inverse
+        self.return_grid_coord = return_grid_coord
+        self.return_min_coord = return_min_coord
+        self.return_displacement = return_displacement
+        self.project_displacement = project_displacement
+        self.cache_dir_name = f"grid_cache_{grid_size}"
+
+    # ------------------------------------------------------------------ #
+    #  Cache I/O
+    # ------------------------------------------------------------------ #
+
+    def _cache_dir(self, data_dict):
+        scene_dir = data_dict.get("scene_dir")
+        if scene_dir is None:
+            return None
+        return os.path.join(scene_dir, self.cache_dir_name)
+
+    @staticmethod
+    def _try_load_cache(cache_dir):
+        if cache_dir is None:
+            return None
+        idx_path = os.path.join(cache_dir, "idx_sort.npy")
+        cnt_path = os.path.join(cache_dir, "count.npy")
+        if not (os.path.isfile(idx_path) and os.path.isfile(cnt_path)):
+            return None
+        return dict(
+            idx_sort=np.load(idx_path),
+            count=np.load(cnt_path),
+        )
+
+    def _compute_voxel_structure(self, coord):
+        scaled_coord = coord / np.array(self.grid_size)
+        grid_coord = np.floor(scaled_coord).astype(int)
+        min_coord = grid_coord.min(0)
+        grid_coord -= min_coord
+        scaled_coord -= min_coord
+        min_coord = min_coord * np.array(self.grid_size)
+        key = self.hash(grid_coord)
+        idx_sort = np.argsort(key)
+        key_sort = key[idx_sort]
+        _, inverse, count = np.unique(
+            key_sort, return_inverse=True, return_counts=True
+        )
+        return dict(
+            idx_sort=idx_sort,
+            count=count,
+            inverse=inverse,
+            grid_coord=grid_coord,
+            min_coord=min_coord,
+            scaled_coord=scaled_coord,
+        )
+
+    @staticmethod
+    def _save_cache(cache_dir, vs):
+        os.makedirs(cache_dir, exist_ok=True)
+        for name in ("idx_sort", "count", "inverse"):
+            arr = vs[name]
+            tmp = os.path.join(cache_dir, f"{name}.tmp.npy")
+            final = os.path.join(cache_dir, f"{name}.npy")
+            np.save(tmp, arr)
+            os.replace(tmp, final)
+
+    # ------------------------------------------------------------------ #
+    #  Helpers
+    # ------------------------------------------------------------------ #
+
+    def _grid_coord_from_coord(self, coord):
+        """Recompute integer grid coordinates (cheap on downsampled data)."""
+        scaled = coord / np.array(self.grid_size)
+        gc = np.floor(scaled).astype(int)
+        gc -= gc.min(0)
+        return gc
+
+    def _ensure_index_valid_keys(self, data_dict):
+        if "index_valid_keys" not in data_dict:
+            data_dict["index_valid_keys"] = [
+                "coord",
+                "color",
+                "normal",
+                "superpoint",
+                "strength",
+                "segment",
+                "instance",
+            ]
+
+    # ------------------------------------------------------------------ #
+    #  __call__
+    # ------------------------------------------------------------------ #
+
+    def __call__(self, data_dict):
+        assert "coord" in data_dict
+        coord = data_dict["coord"]
+
+        cache_dir = self._cache_dir(data_dict)
+        cache = self._try_load_cache(cache_dir)
+
+        if cache is not None:
+            idx_sort = cache["idx_sort"]
+            count = cache["count"]
+            # inverse is loaded on demand below if needed
+            vs_full = None
+        else:
+            vs_full = self._compute_voxel_structure(coord)
+            idx_sort = vs_full["idx_sort"]
+            count = vs_full["count"]
+            if cache_dir is not None:
+                self._save_cache(cache_dir, vs_full)
+
+        if self.mode == "train":
+            idx_select = (
+                np.cumsum(np.insert(count, 0, 0)[0:-1])
+                + np.random.randint(0, count.max(), count.size) % count
+            )
+            idx_unique = idx_sort[idx_select]
+
+            if "sampled_index" in data_dict:
+                idx_unique = np.unique(
+                    np.append(idx_unique, data_dict["sampled_index"])
+                )
+                mask = np.zeros_like(data_dict["segment"]).astype(bool)
+                mask[data_dict["sampled_index"]] = True
+                data_dict["sampled_index"] = np.where(mask[idx_unique])[0]
+
+            data_dict = index_operator(data_dict, idx_unique)
+
+            if self.return_inverse:
+                if vs_full is not None:
+                    inverse = vs_full["inverse"]
+                else:
+                    inv_path = os.path.join(cache_dir, "inverse.npy")
+                    inverse = np.load(inv_path)
+                inv_out = np.zeros_like(inverse)
+                inv_out[idx_sort] = inverse
+                data_dict["inverse"] = inv_out
+
+            if self.return_grid_coord:
+                if vs_full is not None:
+                    data_dict["grid_coord"] = vs_full["grid_coord"][idx_unique]
+                else:
+                    data_dict["grid_coord"] = self._grid_coord_from_coord(
+                        data_dict["coord"]
+                    )
+                self._ensure_index_valid_keys(data_dict)
+                if "grid_coord" not in data_dict["index_valid_keys"]:
+                    data_dict["index_valid_keys"].append("grid_coord")
+
+            if self.return_min_coord:
+                if vs_full is not None:
+                    data_dict["min_coord"] = vs_full["min_coord"].reshape([1, 3])
+                else:
+                    scaled = data_dict["coord"] / np.array(self.grid_size)
+                    gc = np.floor(scaled).astype(int)
+                    mc = gc.min(0) * np.array(self.grid_size)
+                    data_dict["min_coord"] = mc.reshape([1, 3])
+
+            if self.return_displacement:
+                scaled = data_dict["coord"] / np.array(self.grid_size)
+                gc = np.floor(scaled).astype(int)
+                mc = gc.min(0)
+                displacement = scaled - mc - (gc - mc) - 0.5
+                if self.project_displacement:
+                    displacement = np.sum(
+                        displacement * data_dict["normal"], axis=-1, keepdims=True
+                    )
+                data_dict["displacement"] = displacement
+                self._ensure_index_valid_keys(data_dict)
+                if "displacement" not in data_dict["index_valid_keys"]:
+                    data_dict["index_valid_keys"].append("displacement")
+
+            return data_dict
+
+        elif self.mode == "test":
+            data_part_list = []
+            for i in range(count.max()):
+                idx_select = np.cumsum(np.insert(count, 0, 0)[0:-1]) + i % count
+                idx_part = idx_sort[idx_select]
+                data_part = index_operator(data_dict, idx_part, duplicate=True)
+                data_part["index"] = idx_part
+
+                if self.return_inverse:
+                    if vs_full is not None:
+                        inverse = vs_full["inverse"]
+                    else:
+                        inv_path = os.path.join(cache_dir, "inverse.npy")
+                        inverse = np.load(inv_path)
+                    inv_out = np.zeros_like(inverse)
+                    inv_out[idx_sort] = inverse
+                    data_part["inverse"] = inv_out
+
+                if self.return_grid_coord:
+                    if vs_full is not None:
+                        data_part["grid_coord"] = vs_full["grid_coord"][idx_part]
+                    else:
+                        data_part["grid_coord"] = self._grid_coord_from_coord(
+                            data_part["coord"]
+                        )
+                    if "grid_coord" not in data_part["index_valid_keys"]:
+                        data_part["index_valid_keys"].append("grid_coord")
+
+                if self.return_min_coord:
+                    if vs_full is not None:
+                        data_part["min_coord"] = vs_full["min_coord"].reshape([1, 3])
+                    else:
+                        scaled = data_part["coord"] / np.array(self.grid_size)
+                        gc = np.floor(scaled).astype(int)
+                        mc = gc.min(0) * np.array(self.grid_size)
+                        data_part["min_coord"] = mc.reshape([1, 3])
+
+                if self.return_displacement:
+                    scaled = coord / np.array(self.grid_size)
+                    gc = np.floor(scaled).astype(int)
+                    mc = gc.min(0)
+                    displacement = scaled - mc - (gc - mc) - 0.5
+                    if self.project_displacement:
+                        displacement = np.sum(
+                            displacement * data_dict["normal"],
+                            axis=-1,
+                            keepdims=True,
+                        )
+                    data_part["displacement"] = displacement[idx_part]
+                    if "displacement" not in data_part["index_valid_keys"]:
+                        data_part["index_valid_keys"].append("displacement")
+
+                data_part_list.append(data_part)
+            return data_part_list
+        else:
+            raise NotImplementedError
+
+
+@TRANSFORMS.register_module()
+class GridCoord(object):
+    """Compute integer grid coordinates from current point positions.
+
+    Lightweight companion for ``CachedGridSample``.  Place *after* geometric
+    augmentations (rotate, scale, flip, jitter) so that ``grid_coord`` reflects
+    the augmented geometry – matching the behaviour of the original pipeline
+    where ``GridSample`` ran after augmentations.
+    """
+
+    def __init__(self, grid_size=0.05):
+        self.grid_size = grid_size
+
+    def __call__(self, data_dict):
+        coord = data_dict["coord"]
+        scaled = coord / np.array(self.grid_size)
+        grid_coord = np.floor(scaled).astype(int)
+        grid_coord -= grid_coord.min(0)
+        data_dict["grid_coord"] = grid_coord
+        if "index_valid_keys" not in data_dict:
+            data_dict["index_valid_keys"] = [
+                "coord",
+                "color",
+                "normal",
+                "superpoint",
+                "strength",
+                "segment",
+                "instance",
+            ]
+        if "grid_coord" not in data_dict["index_valid_keys"]:
+            data_dict["index_valid_keys"].append("grid_coord")
+        return data_dict
 
 
 @TRANSFORMS.register_module()

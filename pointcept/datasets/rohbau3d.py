@@ -121,7 +121,7 @@ class Rohbau3DDataset(DefaultDataset):
             self._scene_cache.move_to_end(scene_dir)
             return self._clone_data_dict(self._scene_cache[scene_dir])
 
-        data_dict = dict(name=name, split=split)
+        data_dict = dict(name=name, split=split, scene_dir=scene_dir)
 
         coord_path = os.path.join(scene_dir, "coord.npy")
         if not os.path.exists(coord_path):

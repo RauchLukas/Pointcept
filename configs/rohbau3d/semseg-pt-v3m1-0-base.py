@@ -107,6 +107,18 @@ data = dict(
         in_memory_cache_num_scenes=1,
         transform=[
             dict(type="CenterShift", apply_z=True),
+            # --- cached grid subsampling (before augmentations for speed) ---
+            # Pre-computed voxel structure is loaded from disk; only the cheap
+            # random within-voxel selection runs each epoch.  All augmentations
+            # below now operate on the smaller, downsampled cloud.
+            # Pre-compute caches once:
+            #   python tools/precompute_grid_cache.py --data_root data/rohbau3d --grid_size 0.04
+            dict(
+                type="CachedGridSample",
+                grid_size=0.04,
+                hash_type="fnv",
+                mode="train",
+            ),
             dict(
                 type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.2
             ),
@@ -118,13 +130,8 @@ data = dict(
             # dict(type="RandomShift", shift=[0.2, 0.2, 0.2]),
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
-            dict(
-                type="GridSample",
-                grid_size=0.04,
-                hash_type="fnv",
-                mode="train",
-                return_grid_coord=True,
-            ),
+            # grid_coord from augmented geometry (matches original behaviour)
+            dict(type="GridCoord", grid_size=0.04),
             dict(type="SphereCrop", point_max=102400, mode="random"),
             dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]), # https://github.com/Pointcept/Pointcept/issues/103
             dict(type="CenterShift", apply_z=False),
@@ -153,7 +160,7 @@ data = dict(
             dict(type="CenterShift", apply_z=True),
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
-                type="GridSample",
+                type="CachedGridSample",
                 grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
@@ -184,7 +191,7 @@ data = dict(
         test_mode=True,
         test_cfg=dict(
             voxelize=dict(
-                type="GridSample",
+                type="CachedGridSample",
                 grid_size=0.04,
                 hash_type="fnv",
                 mode="test",
