@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 12  # total batch size across all GPUs
+batch_size = 4  # total batch size across all GPUs
 num_worker = 24
 mix_prob = 0.8
 empty_cache = False
@@ -52,8 +52,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 10
-eval_epoch = 10
+epoch = 250
+eval_epoch = 50
 optimizer = dict(type="AdamW", lr=0.003, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -126,7 +126,7 @@ data = dict(
                 return_grid_coord=True,
             ),
             dict(type="SphereCrop", point_max=102400, mode="random"),
-            # dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]), # https://github.com/Pointcept/Pointcept/issues/103
+            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]), # https://github.com/Pointcept/Pointcept/issues/103
             dict(type="CenterShift", apply_z=False),
             dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
@@ -160,12 +160,13 @@ data = dict(
                 return_grid_coord=True,
                 return_inverse=True,
             ),
+            dict(type="SphereCrop", point_max=102400, mode="random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment", "origin_segment", "inverse"),
+                keys=("coord", "grid_coord", "segment",),
                 feat_keys=("color", "normal", "strength"),
             ),
         ],
@@ -321,4 +322,5 @@ data = dict(
         ),
     ),
 )
+
 
