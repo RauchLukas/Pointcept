@@ -5,8 +5,10 @@ Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com), Yujia Zhang (yujia.zhang.cs@gmai
 Please cite our work if the code is helpful to you.
 """
 
+import math
 import os
 import random
+import warnings
 import numbers
 import scipy
 import scipy.ndimage
@@ -1113,6 +1115,8 @@ class CachedGridSample(object):
     def __call__(self, data_dict):
         assert "coord" in data_dict
         coord = data_dict["coord"]
+        # Breadcrumb for GridCoord: subsample voxel size must match grid_coord step.
+        data_dict["_grid_sample_size"] = float(self.grid_size)
 
         cache_dir = self._cache_dir(data_dict)
         cache = self._try_load_cache(cache_dir)
@@ -1264,6 +1268,16 @@ class GridCoord(object):
         self.grid_size = grid_size
 
     def __call__(self, data_dict):
+        if "_grid_sample_size" in data_dict:
+            gs = float(data_dict["_grid_sample_size"])
+            if not math.isclose(gs, float(self.grid_size), rel_tol=0.0, abs_tol=1e-9):
+                warnings.warn(
+                    f"GridCoord grid_size={self.grid_size} does not match "
+                    f"CachedGridSample _grid_sample_size={gs}. "
+                    "They must be equal for PT-v3 (sparse_shape / serialization).",
+                    UserWarning,
+                    stacklevel=2,
+                )
         coord = data_dict["coord"]
         scaled = coord / np.array(self.grid_size)
         grid_coord = np.floor(scaled).astype(int)
