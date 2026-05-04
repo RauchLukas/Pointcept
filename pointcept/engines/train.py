@@ -200,6 +200,9 @@ class Trainer(TrainerBase):
         with auto_cast(
             enabled=self.cfg.enable_amp, dtype=AMP_DTYPE[self.cfg.amp_dtype]
         ):
+            # DEBUG 
+            print("coord:      ",input_dict["coord"].shape)
+            print("grid_coord: ", input_dict["grid_coord"].shape)
             output_dict = self.model(input_dict)
             loss = (
                 output_dict["loss"] / self.cfg.gradient_accumulation_steps

@@ -93,6 +93,9 @@ class DefaultDataset(Dataset):
 
         data_list = []
         for split in split_list:
+            # DEBUG Remove
+            logger = get_root_logger()
+            logger.debug(f"Loading data list from {os.path.join(self.data_root, split)}")
             if os.path.isfile(os.path.join(self.data_root, split)):
                 with open(os.path.join(self.data_root, split)) as f:
                     data_list += [
@@ -174,6 +177,11 @@ class DefaultDataset(Dataset):
             data_dict_list.append(aug(deepcopy(data_dict)))
 
         fragment_list = []
+
+        # DEBUG ToDo remove
+        logger = get_root_logger()
+        logger.debug(f"Test: {idx + 1}/{len(self.data_list) * self.loop}, data name: {result_dict['name']}")
+        logger.debug("Building Fragment List ...")
         for data in data_dict_list:
             if self.test_voxelize is not None:
                 data_part_list = self.test_voxelize(data)

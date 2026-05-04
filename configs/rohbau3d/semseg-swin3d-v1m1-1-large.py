@@ -1,7 +1,7 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 12  # total batch size across all GPUs
+batch_size = 24  # total batch size across all GPUs
 num_worker = 24
 mix_prob = 0.8
 empty_cache = True
@@ -9,46 +9,28 @@ enable_amp = True
 
 # model settings
 model = dict(
-    type="DefaultSegmentorV2",
-    num_classes=18,
-    backbone_out_channels=64,
+    type="DefaultSegmentor",
     backbone=dict(
-        type="PT-v3m1",
-        in_channels=7,  # color(3) + normal(3) + strength(1)
-        order=("z", "z-trans", "hilbert", "hilbert-trans"),
-        stride=(2, 2, 2, 2),
-        enc_depths=(2, 2, 2, 6, 2),
-        enc_channels=(32, 64, 128, 256, 512),
-        enc_num_head=(2, 4, 8, 16, 32),
-        enc_patch_size=(128, 128, 128, 128, 128),
-        dec_depths=(2, 2, 2, 2),
-        dec_channels=(64, 64, 128, 256),
-        dec_num_head=(4, 4, 8, 16),
-        dec_patch_size=(128, 128, 128, 128),
-        mlp_ratio=4,
-        qkv_bias=True,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        drop_path=0.3,
-        shuffle_orders=True,
-        pre_norm=True,
-        enable_rpe=True,
-        enable_flash=False,
-        upcast_attention=True,
-        upcast_softmax=True,
-        enc_mode=False,
-        pdnorm_bn=False,
-        pdnorm_ln=False,
-        pdnorm_decouple=True,
-        pdnorm_adaptive=False,
-        pdnorm_affine=True,
-        pdnorm_conditions=("ScanNet", "S3DIS", "Structured3D", "Rohbau3D"),
+        type="Swin3D-v1m1",
+        in_channels=7,
+        num_classes=18,
+        base_grid_size=0.02,
+        depths=[2, 4, 9, 4, 4],
+        channels=[80, 160, 320, 640, 640],
+        num_heads=[10, 10, 20, 40, 40],
+        window_sizes=[5, 7, 7, 7, 7],
+        quant_size=4,
+        drop_path_rate=0.3,
+        up_k=3,
+        num_layers=5,
+        stem_transformer=True,
+        down_stride=3,
+        upsample="linear_attn",
+        knn_down=True,
+        cRSE="XYZ_RGB_NORM",
+        fp16_mode=1,
     ),
-    criteria=[
-        dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1),
-        dict(type="LovaszLoss", mode="multiclass", loss_weight=1.0, ignore_index=-1),
-    ],
+    criteria=[dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1)],
 )
 
 # scheduler settings
@@ -71,9 +53,6 @@ param_dicts = [dict(keyword="block", lr=0.0006)]
 dataset_type = "Rohbau3DDataset"
 data_root = "../data/rohbau3d"
 ignore_index = -1
-# Voxel size for CachedGridSample (disk cache dir) and test voxelize; GridCoord
-# must use the *same* value — PT-v3 assumes grid_coord matches subsample resolution.
-grid_size = 0.04
 names = [
     "None",
     "Ceiling",
@@ -110,17 +89,13 @@ data = dict(
         in_memory_cache_num_scenes=1,
         transform=[
             dict(type="CenterShift", apply_z=True),
-            # --- cached grid subsampling (before augmentations for speed) ---
-            # Pre-computed voxel structure is loaded from disk; only the cheap
-            # random within-voxel selection runs each epoch.  All augmentations
-            # below now operate on the smaller, downsampled cloud.
-            # Pre-compute caches once (use same value as grid_size above):
-            #   python tools/precompute_grid_cache.py --data_root data/rohbau3d --grid_size <grid_size>
             dict(
                 type="CachedGridSample",
-                grid_size=grid_size,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
+                return_grid_coord=True,
+                return_displacement=False,
             ),
             dict(
                 type="RandomDropout", dropout_ratio=0.2, dropout_application_ratio=0.2
@@ -134,9 +109,9 @@ data = dict(
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # grid_coord from augmented geometry (matches original behaviour)
-            dict(type="GridCoord", grid_size=grid_size),
+            dict(type="GridCoord", grid_size=0.04),
             dict(type="SphereCrop", point_max=102400, mode="random"),
-            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]), # https://github.com/Pointcept/Pointcept/issues/103
+            dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]),
             dict(type="CenterShift", apply_z=False),
             dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
             dict(type="ChromaticTranslation", p=0.95, ratio=0.05),
@@ -150,6 +125,7 @@ data = dict(
                 type="Collect",
                 keys=("coord", "grid_coord", "segment"),
                 feat_keys=("color", "normal", "strength"),
+                coord_feat_keys=("color", "normal", "strength"),
             ),
         ],
         test_mode=False,
@@ -164,21 +140,21 @@ data = dict(
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
                 type="CachedGridSample",
-                grid_size=grid_size,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 return_inverse=True,
             ),
-            dict(type="GridCoord", grid_size=0.04),
             dict(type="SphereCrop", point_max=102400, mode="random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),
             dict(
                 type="Collect",
-                keys=("coord", "grid_coord", "segment",),
+                keys=("coord", "grid_coord", "segment"),
                 feat_keys=("color", "normal", "strength"),
+                coord_feat_keys=("color", "normal", "strength"),
             ),
         ],
         test_mode=False,
@@ -193,7 +169,7 @@ data = dict(
             dict(type='Copy', keys_dict=dict(segment='origin_segment')),
             dict(
                 type='GridSample',
-                grid_size=0.05,
+                grid_size=0.04,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -202,10 +178,10 @@ data = dict(
         test_mode=True,
         test_cfg=dict(
             voxelize=dict(
-                type="CachedGridSample",
-                grid_size=grid_size,
-                hash_type="fnv",
-                mode="test",
+                type='GridSample',
+                grid_size=0.02,
+                hash_type='fnv',
+                mode='test',
                 return_grid_coord=True,
                 return_displacement=False),
             crop=None,
@@ -213,9 +189,10 @@ data = dict(
                 dict(type='CenterShift', apply_z=False),
                 dict(type='ToTensor'),
                 dict(
-                    type='Collect',
-                    keys=('coord', 'grid_coord', 'index'),
-                    feat_keys=("color", "normal", "strength"))
+                    type="Collect",
+                    keys=("coord", "grid_coord", "index"),
+                    feat_keys=("color", "normal", "strength"),
+                    coord_feat_keys=("color", "normal", "strength")),
             ],
             aug_transform=[[{
                 'type': 'RandomRotateTargetAngle',
