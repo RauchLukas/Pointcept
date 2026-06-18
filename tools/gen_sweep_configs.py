@@ -33,7 +33,12 @@ import re
 # --------------------------------------------------------------------------- #
 DATASET = "rohbau3d"
 BASE_CONFIG = "configs/rohbau3d/semseg-pt-v3m1-0-parameterstudy.py"
-NUM_GPU = 4  # passed to scripts/train.sh -g
+# IMPORTANT: in Pointcept the config ``batch_size`` is the TOTAL across all GPUs
+# and must be divisible by NUM_GPU. The per-GPU batch is batch_size // NUM_GPU.
+# This study uses 4-GPU DDP with per-GPU batch 1/2/3, i.e. TOTAL batch_size of
+# 4/8/12. Set totals accordingly below (per_gpu * NUM_GPU).
+NUM_GPU = 4  # GPUs per run, passed to scripts/train.sh -g
+NUM_DEVICES = 4  # total GPUs available (only used by the single-GPU parallel launcher)
 
 # Parameters this generator is allowed to substitute. Each MUST exist as a
 # top-level ``name = ...`` assignment in the base config.
@@ -47,7 +52,8 @@ SUBSTITUTABLE = ["lr", "batch_size", "loop", "grid_size", "voxel_max", "mix_prob
 # --------------------------------------------------------------------------- #
 LR_PHASE = dict(
     out_subdir="sweep_lr",
-    fixed=dict(batch_size=3, loop=4, grid_size=0.04, voxel_max=64000, mix_prob=0),
+    # batch_size=12 TOTAL = per-GPU 3 x 4 GPUs.
+    fixed=dict(batch_size=12, loop=4, grid_size=0.04, voxel_max=64000, mix_prob=0),
     grid=dict(lr=[0.0003, 0.0006, 0.001, 0.003, 0.006]),
 )
 
@@ -59,7 +65,7 @@ MAIN_PHASE = dict(
     out_subdir="sweep_main",
     fixed=dict(lr=BEST_LR, mix_prob=0),
     grid=dict(
-        batch_size=[1, 2, 3],
+        batch_size=[4, 8, 12],  # TOTAL = per-GPU 1/2/3 x 4 GPUs
         grid_size=[0.08],     # <-- add the grid sizes you want to test
         voxel_max=[80000],    # <-- add the voxel_max values you want to test
         loop=[16],            # <-- add the loop values you want to test
@@ -117,7 +123,15 @@ def build_phase(phase_cfg, base_text, root):
     combos = list(itertools.product(*[grid[k] for k in grid_keys]))
 
     manifest_rows = []
-    launch_lines = ["#!/bin/sh", "set -e", "cd \"$(dirname \"$0\")/..\" || exit", ""]
+    launch_lines = [
+        "#!/bin/sh",
+        "set -e",
+        "# Location-independent: invoke from anywhere (e.g. the directory above",
+        "# Pointcept). train.sh itself cd's to the Pointcept root, so data_root",
+        "# (../data) resolves correctly regardless of where you run this from.",
+        'SCRIPT_DIR=$(dirname "$0")',
+        "",
+    ]
 
     for combo in combos:
         overrides = dict(fixed)
@@ -140,7 +154,7 @@ def build_phase(phase_cfg, base_text, root):
         manifest_rows.append(row)
 
         launch_lines.append(
-            f"sh scripts/train.sh -d {DATASET} -c {config_name} "
+            f'sh "$SCRIPT_DIR/train.sh" -d {DATASET} -c {config_name} '
             f"-n {out_subdir}/{exp_name} -g {NUM_GPU}"
         )
 
@@ -159,7 +173,35 @@ def build_phase(phase_cfg, base_text, root):
 
     print(f"[{out_subdir}] wrote {len(combos)} configs -> {out_dir}")
     print(f"[{out_subdir}] manifest -> {manifest_path}")
-    print(f"[{out_subdir}] launch script -> {launch_path}")
+    print(f"[{out_subdir}] launch script (sequential) -> {launch_path}")
+
+    # The per-GPU parallel launcher only makes sense when each run uses a single
+    # GPU. With multi-GPU DDP (NUM_GPU > 1) each run already uses every GPU, so
+    # runs must be sequential.
+    if NUM_GPU == 1:
+        parallel_lines = [
+            "#!/bin/sh",
+            "# Parallel launcher: runs configs concurrently, one per GPU, in waves",
+            f"# of {NUM_DEVICES}. Invoke from anywhere (train.sh cd's to Pointcept root).",
+            'SCRIPT_DIR=$(dirname "$0")',
+            "",
+        ]
+        for i, row in enumerate(manifest_rows):
+            device = i % NUM_DEVICES
+            parallel_lines.append(
+                f'CUDA_VISIBLE_DEVICES={device} sh "$SCRIPT_DIR/train.sh" -d {DATASET} '
+                f'-c {row["config_name"]} -n {row["exp_name"]} -g 1 &'
+            )
+            if device == NUM_DEVICES - 1:
+                parallel_lines.append("wait")
+        parallel_lines.append("wait")
+
+        parallel_path = os.path.join(
+            root, "scripts", f"{out_subdir}_launch_parallel.sh"
+        )
+        with open(parallel_path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("\n".join(parallel_lines) + "\n")
+        print(f"[{out_subdir}] launch script (parallel)   -> {parallel_path}")
 
 
 def main():

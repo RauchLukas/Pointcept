@@ -8,7 +8,7 @@ _base_ = ["../../_base_/default_runtime.py"]
 seed = 0
 
 # misc custom setting
-batch_size = 3
+batch_size = 12
 loop = 4
 grid_size = 0.04
 voxel_max = 64000

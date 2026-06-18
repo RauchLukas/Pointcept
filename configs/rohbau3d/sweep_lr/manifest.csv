@@ -1,6 +1,6 @@
 config_name,exp_name,batch_size,grid_size,loop,lr,mix_prob,voxel_max
-sweep_lr/lr0p0003,sweep_lr/lr0p0003,3,0.04,4,0.0003,0,64000
-sweep_lr/lr0p0006,sweep_lr/lr0p0006,3,0.04,4,0.0006,0,64000
-sweep_lr/lr0p001,sweep_lr/lr0p001,3,0.04,4,0.001,0,64000
-sweep_lr/lr0p003,sweep_lr/lr0p003,3,0.04,4,0.003,0,64000
-sweep_lr/lr0p006,sweep_lr/lr0p006,3,0.04,4,0.006,0,64000
+sweep_lr/lr0p0003,sweep_lr/lr0p0003,12,0.04,4,0.0003,0,64000
+sweep_lr/lr0p0006,sweep_lr/lr0p0006,12,0.04,4,0.0006,0,64000
+sweep_lr/lr0p001,sweep_lr/lr0p001,12,0.04,4,0.001,0,64000
+sweep_lr/lr0p003,sweep_lr/lr0p003,12,0.04,4,0.003,0,64000
+sweep_lr/lr0p006,sweep_lr/lr0p006,12,0.04,4,0.006,0,64000
