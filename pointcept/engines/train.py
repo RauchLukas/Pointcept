@@ -200,9 +200,7 @@ class Trainer(TrainerBase):
         with auto_cast(
             enabled=self.cfg.enable_amp, dtype=AMP_DTYPE[self.cfg.amp_dtype]
         ):
-            # DEBUG 
-            print("coord:      ",input_dict["coord"].shape)
-            print("grid_coord: ", input_dict["grid_coord"].shape)
+            # print(input_dict["coord"].shape)
             output_dict = self.model(input_dict)
             loss = (
                 output_dict["loss"] / self.cfg.gradient_accumulation_steps
@@ -244,7 +242,13 @@ class Trainer(TrainerBase):
 
         if self.cfg.empty_cache:
             torch.cuda.empty_cache()
-        self.comm_info["model_output_dict"] = output_dict
+        # self.comm_info["model_output_dict"] = output_dict
+
+        # ToDo DeBug: Does this fix CUDA memmory accumulation?
+        self.comm_info["model_output_dict"] = {
+            k: v.detach().cpu() if torch.is_tensor(v) else v
+            for k, v in output_dict.items()
+        }
 
     def after_epoch(self):
         for h in self.hooks:

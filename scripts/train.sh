@@ -16,6 +16,29 @@ NUM_MACHINE=1
 DIST_URL="auto"
 
 
+
+mkdir -p /home/a21blura/Pointcept/.cache
+mkdir -p /home/a21blura/Pointcept/.config
+mkdir -p /home/a21blura/Pointcept/wandb
+mkdir -p /home/a21blura/Pointcept/tmp
+
+
+export TMPDIR=/home/a21blura/Pointcept/tmp
+export TMP=/home/a21blura/Pointcept/tmp
+export TEMP=/home/a21blura/Pointcept/tmp
+
+export XDG_CACHE_HOME=/home/a21blura/Pointcept/.cache
+export XDG_CONFIG_HOME=/home/a21blura/Pointcept/.config
+
+export WANDB_DIR=/home/a21blura/Pointcept/wandb
+export WANDB_CACHE_DIR=/home/a21blura/Pointcept/wandb/cache
+export WANDB_CONFIG_DIR=/home/a21blura/Pointcept/wandb/config
+
+export PYTHONWARNINGS="ignore::FutureWarning"
+
+
+
+
 while getopts "p:d:c:n:w:g:m:r:" opt; do
   case $opt in
     p)

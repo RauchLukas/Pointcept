@@ -560,7 +560,7 @@ class InsSegEvaluator(HookBase):
             with torch.no_grad():
                 output_dict = self.trainer.model(input_dict)
 
-            loss = output_dict["loss"]
+            loss = output_dict["loss"].item()
 
             segment = input_dict["segment"]
             instance = input_dict["instance"]

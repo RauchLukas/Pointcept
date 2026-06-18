@@ -1,17 +1,22 @@
 _base_ = ["../_base_/default_runtime.py"]
 
 # misc custom setting
-batch_size = 16  # total batch size across all GPUs
+batch_size = 16   # total batch size across all GPUs
+loop = 16 
+grid_size = 0.08
+voxel_max = 80000
+lr = 0.003
+
 num_worker = 24
 mix_prob = 0.8
-empty_cache = True
+empty_cache = False
+empty_cache_per_epoch = False
 enable_amp = True
 
 
-enable_wandb = False
-wandb_project = "pointcept_test"  # custom your project name e.g. Sonata, PTv3
+enable_wandb = True
+wandb_project = "pointcept_greedy"  # custom your project name e.g. Sonata, PTv3
 wandb_key = None  # wandb token, default is None. If None, login with `wandb login` in your terminal
-
 
 
 # model settings
@@ -59,25 +64,28 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 50
-eval_epoch = 50
-optimizer = dict(type="AdamW", lr=0.006, weight_decay=0.05)
+epoch = 50 * loop
+eval_epoch = 50 
+optimizer = dict(type="AdamW", lr=lr, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
-    max_lr=[0.006, 0.0006],
+    max_lr=[lr, lr/10],
     pct_start=0.05,
     anneal_strategy="cos",
     div_factor=10.0,
     final_div_factor=1000.0,
 )
 
-param_dicts = [dict(keyword="block", lr=0.0006)]
+param_dicts = [dict(keyword="block", lr=lr)]
 
 
 # dataset settings
 dataset_type = "Rohbau3DDataset"
 data_root = "../data/rohbau3d"
 ignore_index = -1
+# Voxel size for CachedGridSample (disk cache dir) and test voxelize; GridCoord
+# must use the *same* value — PT-v3 assumes grid_coord matches subsample resolution.
+
 names = [
     "None",
     "Ceiling",
@@ -118,11 +126,11 @@ data = dict(
             # Pre-computed voxel structure is loaded from disk; only the cheap
             # random within-voxel selection runs each epoch.  All augmentations
             # below now operate on the smaller, downsampled cloud.
-            # Pre-compute caches once:
-            #   python tools/precompute_grid_cache.py --data_root data/rohbau3d --grid_size 0.04
+            # Pre-compute caches once (use same value as grid_size above):
+            #   python tools/precompute_grid_cache.py --data_root data/rohbau3d --grid_size <grid_size>
             dict(
                 type="CachedGridSample",
-                grid_size=0.01,
+                grid_size=grid_size,
                 hash_type="fnv",
                 mode="train",
             ),
@@ -138,8 +146,8 @@ data = dict(
             dict(type="RandomFlip", p=0.5),
             dict(type="RandomJitter", sigma=0.005, clip=0.02),
             # grid_coord from augmented geometry (matches original behaviour)
-            dict(type="GridCoord", grid_size=0.04),
-            dict(type="SphereCrop", point_max=61000, mode="random"),
+            dict(type="GridCoord", grid_size=grid_size),
+            dict(type="SphereCrop", point_max=voxel_max, mode="random"),
             dict(type="ElasticDistortion", distortion_params=[[0.2, 0.4], [0.8, 1.6]]), # https://github.com/Pointcept/Pointcept/issues/103
             dict(type="CenterShift", apply_z=False),
             dict(type="ChromaticAutoContrast", p=0.2, blend_factor=None),
@@ -168,13 +176,13 @@ data = dict(
             dict(type="Copy", keys_dict={"segment": "origin_segment"}),
             dict(
                 type="CachedGridSample",
-                grid_size=0.01,
+                grid_size=grid_size,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
                 return_inverse=True,
             ),
-            dict(type="GridCoord", grid_size=0.04),
+            dict(type="GridCoord", grid_size=grid_size),
             dict(type="SphereCrop", point_max=256000, mode="random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
@@ -197,7 +205,7 @@ data = dict(
             dict(type='Copy', keys_dict=dict(segment='origin_segment')),
             dict(
                 type='GridSample',
-                grid_size=0.05,
+                grid_size=grid_size,
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
@@ -206,10 +214,10 @@ data = dict(
         test_mode=True,
         test_cfg=dict(
             voxelize=dict(
-                type='GridSample',
-                grid_size=0.025,
-                hash_type='fnv',
-                mode='test',
+                type="CachedGridSample",
+                grid_size=grid_size,
+                hash_type="fnv",
+                mode="test",
                 return_grid_coord=True,
                 return_displacement=False),
             crop=None,
