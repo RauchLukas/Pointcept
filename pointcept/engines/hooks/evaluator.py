@@ -122,6 +122,11 @@ class SemSegEvaluator(HookBase):
     def before_train(self):
         if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
             wandb.define_metric("val/*", step_metric="Epoch")
+            # Track per-metric maxima in the run summary so the best mIoU/mAcc/
+            # allAcc show up directly in the wandb run/sweep comparison table.
+            wandb.define_metric("val/mIoU", step_metric="Epoch", summary="max")
+            wandb.define_metric("val/mAcc", step_metric="Epoch", summary="max")
+            wandb.define_metric("val/allAcc", step_metric="Epoch", summary="max")
 
     def after_epoch(self):
         if self.trainer.cfg.evaluate:

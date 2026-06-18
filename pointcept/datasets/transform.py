@@ -8,6 +8,7 @@ Please cite our work if the code is helpful to you.
 import math
 import os
 import random
+import hashlib
 import warnings
 import numbers
 import scipy
@@ -1303,8 +1304,21 @@ class SphereCrop(object):
     def __init__(self, point_max=80000, sample_rate=None, mode="random"):
         self.point_max = point_max
         self.sample_rate = sample_rate
-        assert mode in ["random", "center", "all", "given"]
+        assert mode in ["random", "center", "all", "given", "stable_random"]
         self.mode = mode
+
+    @staticmethod
+    def _stable_scene_seed(data_dict):
+        """Deterministic 32-bit seed from a stable scene identifier.
+
+        Used by mode="stable_random" so that a given scene always crops around
+        the same (randomly-located) center across runs/workers, independent of
+        the global RNG state. Avoids the center-bias of mode="center" while
+        keeping validation reproducible.
+        """
+        scene_id = data_dict.get("name") or data_dict.get("scene_dir") or ""
+        digest = hashlib.md5(str(scene_id).encode("utf-8")).digest()[:8]
+        return int.from_bytes(digest, "little") % (2**32)
 
     def __call__(self, data_dict):
         point_max = (
@@ -1318,6 +1332,11 @@ class SphereCrop(object):
             if self.mode == "random":
                 center = data_dict["coord"][
                     np.random.randint(data_dict["coord"].shape[0])
+                ]
+            elif self.mode == "stable_random":
+                rng = np.random.RandomState(self._stable_scene_seed(data_dict))
+                center = data_dict["coord"][
+                    rng.randint(data_dict["coord"].shape[0])
                 ]
             elif self.mode == "center":
                 center = data_dict["coord"][data_dict["coord"].shape[0] // 2]

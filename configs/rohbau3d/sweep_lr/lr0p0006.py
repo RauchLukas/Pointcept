@@ -1,4 +1,4 @@
-_base_ = ["../_base_/default_runtime.py"]
+_base_ = ["../../_base_/default_runtime.py"]
 
 # Fixed seed for the hyperparameter study: keeps every run reproducible so that
 # differences in results come from the swept knobs (batch_size, grid_size,
@@ -8,11 +8,11 @@ _base_ = ["../_base_/default_runtime.py"]
 seed = 0
 
 # misc custom setting
-batch_size = 16   # total batch size across all GPUs
-loop = 16 
-grid_size = 0.08
-voxel_max = 80000
-lr = 0.003
+batch_size = 3
+loop = 4
+grid_size = 0.04
+voxel_max = 64000
+lr = 0.0006
 
 num_worker = 24
 # Mixup (Mix3D) is DISABLED for the hyperparameter sweep: it merges pairs of

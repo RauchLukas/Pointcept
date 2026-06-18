@@ -327,6 +327,22 @@ class Trainer(TrainerBase):
                 val_sampler = torch.utils.data.distributed.DistributedSampler(val_data)
             else:
                 val_sampler = None
+
+            # Seed validation workers so that numpy-based randomness in the val
+            # transforms (e.g. the within-voxel pick in CachedGridSample) is
+            # reproducible. Without this the val loader has no worker_init_fn,
+            # leaving numpy unseeded in workers and making the val metric noisy.
+            val_init_fn = (
+                partial(
+                    worker_init_fn,
+                    num_workers=self.cfg.num_worker_per_gpu,
+                    rank=comm.get_rank(),
+                    seed=self.cfg.seed,
+                )
+                if self.cfg.seed is not None
+                else None
+            )
+
             val_loader = torch.utils.data.DataLoader(
                 val_data,
                 batch_size=self.cfg.batch_size_val_per_gpu,
@@ -335,6 +351,7 @@ class Trainer(TrainerBase):
                 pin_memory=True,
                 sampler=val_sampler,
                 collate_fn=collate_fn,
+                worker_init_fn=val_init_fn,
             )
         return val_loader
 
