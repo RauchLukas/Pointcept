@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import pointops
 from uuid import uuid4
+from collections import deque
 
 import pointcept.utils.comm as comm
 from pointcept.utils.misc import intersection_and_union_gpu
@@ -116,10 +117,16 @@ class ClsEvaluator(HookBase):
 
 @HOOKS.register_module()
 class SemSegEvaluator(HookBase):
-    def __init__(self, write_cls_iou=False):
+    def __init__(self, write_cls_iou=False, miou_avg_window=3):
         self.write_cls_iou = write_cls_iou
+        # Rolling mean of val mIoU over the last `miou_avg_window` evaluations -
+        # a smoothed, less noisy metric for ranking configs (the single-epoch
+        # val mIoU scatters a lot on a small validation set).
+        self.miou_avg_window = miou_avg_window
+        self._miou_history = deque(maxlen=miou_avg_window)
 
     def before_train(self):
+        self._miou_history.clear()
         if self.trainer.writer is not None and self.trainer.cfg.enable_wandb:
             wandb.define_metric("val/*", step_metric="Epoch")
             # Track per-metric maxima in the run summary so the best mIoU/mAcc/
@@ -127,6 +134,11 @@ class SemSegEvaluator(HookBase):
             wandb.define_metric("val/mIoU", step_metric="Epoch", summary="max")
             wandb.define_metric("val/mAcc", step_metric="Epoch", summary="max")
             wandb.define_metric("val/allAcc", step_metric="Epoch", summary="max")
+            wandb.define_metric(
+                f"val/mIoU_avg{self.miou_avg_window}",
+                step_metric="Epoch",
+                summary="max",
+            )
 
     def after_epoch(self):
         if self.trainer.cfg.evaluate:
@@ -204,11 +216,17 @@ class SemSegEvaluator(HookBase):
                 )
             )
         current_epoch = self.trainer.epoch + 1
+        # Rolling mean of val mIoU over the last `miou_avg_window` evaluations.
+        # Before the window is full it averages whatever is available so far.
+        self._miou_history.append(m_iou)
+        m_iou_avg = float(np.mean(self._miou_history))
+        miou_avg_key = f"val/mIoU_avg{self.miou_avg_window}"
         if self.trainer.writer is not None:
             self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
             self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
             self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
             self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+            self.trainer.writer.add_scalar(miou_avg_key, m_iou_avg, current_epoch)
             if self.trainer.cfg.enable_wandb:
                 wandb.log(
                     {
@@ -217,6 +235,7 @@ class SemSegEvaluator(HookBase):
                         "val/mIoU": m_iou,
                         "val/mAcc": m_acc,
                         "val/allAcc": all_acc,
+                        miou_avg_key: m_iou_avg,
                     },
                     step=wandb.run.step,
                 )
