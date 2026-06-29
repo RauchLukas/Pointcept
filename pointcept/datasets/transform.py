@@ -1328,6 +1328,12 @@ class SphereCrop(object):
         )
 
         assert "coord" in data_dict.keys()
+
+        # "all" tiles the cloud into a list of crops that together cover every
+        # point (used as the test-time `crop` to bound points per forward pass).
+        if self.mode == "all":
+            return self._crop_all(data_dict, point_max)
+
         if data_dict["coord"].shape[0] > point_max:
             if self.mode == "random":
                 center = data_dict["coord"][
@@ -1361,6 +1367,32 @@ class SphereCrop(object):
             ]
             data_dict = index_operator(data_dict, idx_crop)
         return data_dict
+
+    def _crop_all(self, data_dict, point_max):
+        """Tile the cloud into a list of crops (each <= point_max points) that
+        together cover every point. Used as the test-time ``crop`` to bound the
+        number of points per forward pass and avoid spconv / CUDA OOM on large
+        fragments (e.g. fine grid_size). Deterministic: each crop is centered on
+        the first not-yet-covered point. Crops may overlap; the tester simply
+        accumulates (averages) predictions for points seen more than once.
+        """
+        coord = data_dict["coord"]
+        n = coord.shape[0]
+        if n <= point_max:
+            return [data_dict]
+        data_part_list = []
+        covered = np.zeros(n, dtype=bool)
+        while not covered.all():
+            center = coord[np.where(~covered)[0][0]]
+            idx_crop = np.argsort(np.sum(np.square(coord - center), 1))[:point_max]
+            covered[idx_crop] = True
+            data_part = index_operator(data_dict, idx_crop, duplicate=True)
+            # "index" is not in index_valid_keys, so subset it explicitly to keep
+            # the fragment -> scene mapping correct for prediction accumulation.
+            if "index" in data_dict:
+                data_part["index"] = data_dict["index"][idx_crop]
+            data_part_list.append(data_part)
+        return data_part_list
 
 
 @TRANSFORMS.register_module()
