@@ -13,6 +13,7 @@ loop = 16
 grid_size = 0.08
 voxel_max = 80000
 lr = 0.003
+weight_decay = 0.05
 
 num_worker = 24
 # Mixup (Mix3D) is DISABLED for the hyperparameter sweep: it merges pairs of
@@ -75,9 +76,9 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 20 * loop
-eval_epoch = 50 
-optimizer = dict(type="AdamW", lr=lr, weight_decay=0.05)
+epoch = 2 * loop
+eval_epoch = 2 
+optimizer = dict(type="AdamW", lr=lr, weight_decay=weight_decay)
 scheduler = dict(
     type="OneCycleLR",
     max_lr=[lr, lr/10],
@@ -100,6 +101,7 @@ hooks = [
     dict(type="InformationWriter"),
     dict(type="SemSegEvaluator"),
     dict(type="CheckpointSaver", save_freq=None),
+    dict(type="PreciseEvaluator", test_last=False),
 ]
 
 
@@ -210,7 +212,8 @@ data = dict(
             # Per-scene fixed random crop center: reproducible across runs (seeded
             # from the scene name), but spatially varied between scenes. Avoids the
             # center-bias of mode="center" while keeping the val metric stable.
-            dict(type="SphereCrop", point_max=512000, mode="stable_random"),
+            # dict(type="SphereCrop", point_max=512000, mode="center"),
+            dict(type="SphereCrop", point_max=450000, mode="stable_random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),
@@ -236,7 +239,7 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                return_inverse=True)
+                return_inverse=True),
         ],
         test_mode=True,
         test_cfg=dict(
@@ -249,6 +252,7 @@ data = dict(
                 return_displacement=False),
             crop=None,
             post_transform=[
+                # dict(type="SphereCrop", point_max=650000, mode="stable_random"),
                 dict(type='CenterShift', apply_z=False),
                 dict(type='ToTensor'),
                 dict(
