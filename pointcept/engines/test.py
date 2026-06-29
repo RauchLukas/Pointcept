@@ -34,6 +34,11 @@ try:
 except:
     pointops = None
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 
 TESTERS = Registry("testers")
 
@@ -354,6 +359,27 @@ class SemSegTester(TesterBase):
                         accuracy=accuracy_class[i],
                     )
                 )
+            # Log the final precise-test results to wandb. Guarded so this is a
+            # no-op when wandb is unused or not initialized (e.g. standalone
+            # tools/test.py). Written to run.summary so the numbers appear as the
+            # run's final columns in the wandb table / sweep comparison.
+            if (
+                getattr(self.cfg, "enable_wandb", False)
+                and wandb is not None
+                and wandb.run is not None
+            ):
+                test_metrics = {
+                    "test/mIoU": mIoU,
+                    "test/mAcc": mAcc,
+                    "test/allAcc": allAcc,
+                }
+                for i in range(self.cfg.data.num_classes):
+                    test_metrics[
+                        f"test/cls_{i}-{self.cfg.data.names[i]} IoU"
+                    ] = iou_class[i]
+                wandb.log(test_metrics)
+                wandb.run.summary.update(test_metrics)
+
             logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
 
     @staticmethod
