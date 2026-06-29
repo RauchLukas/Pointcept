@@ -250,7 +250,12 @@ data = dict(
                 mode="test",
                 return_grid_coord=True,
                 return_displacement=False),
-            crop=None,
+            # Tile each test fragment into <=point_max-point crops so a single
+            # forward never exceeds GPU memory (fine grid_size produces huge
+            # fragments -> spconv "can't find suitable algorithm" / OOM). Crops
+            # cover the whole scene; overlaps are averaged. Lower point_max if
+            # testing still OOMs, raise it for fewer/faster forward passes.
+            crop=dict(type="SphereCrop", point_max=100000, mode="all"),
             post_transform=[
                 # dict(type="SphereCrop", point_max=650000, mode="stable_random"),
                 dict(type='CenterShift', apply_z=False),
