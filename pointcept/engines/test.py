@@ -200,8 +200,21 @@ class SemSegTester(TesterBase):
                             input_dict[key] = input_dict[key].cuda(non_blocking=True)
                     idx_part = input_dict["index"]
                     with torch.no_grad():
-                        pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
-                        pred_part = F.softmax(pred_part, -1)
+                        # Run inference under autocast (when enable_amp) to cut
+                        # activation memory roughly in half - helps avoid OOM on
+                        # large test fragments. Softmax is done in fp32.
+                        with torch.autocast(
+                            device_type="cuda",
+                            dtype=(
+                                torch.bfloat16
+                                if getattr(self.cfg, "amp_dtype", "float16")
+                                == "bfloat16"
+                                else torch.float16
+                            ),
+                            enabled=getattr(self.cfg, "enable_amp", False),
+                        ):
+                            pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
+                        pred_part = F.softmax(pred_part.float(), -1)
                         if self.cfg.empty_cache:
                             torch.cuda.empty_cache()
                         bs = 0
@@ -469,8 +482,21 @@ class DINOSemSegTester(TesterBase):
                     input_dict["dino_offset"] = dino_offset
                     idx_part = input_dict["index"]
                     with torch.no_grad():
-                        pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
-                        pred_part = F.softmax(pred_part, -1)
+                        # Run inference under autocast (when enable_amp) to cut
+                        # activation memory roughly in half - helps avoid OOM on
+                        # large test fragments. Softmax is done in fp32.
+                        with torch.autocast(
+                            device_type="cuda",
+                            dtype=(
+                                torch.bfloat16
+                                if getattr(self.cfg, "amp_dtype", "float16")
+                                == "bfloat16"
+                                else torch.float16
+                            ),
+                            enabled=getattr(self.cfg, "enable_amp", False),
+                        ):
+                            pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
+                        pred_part = F.softmax(pred_part.float(), -1)
                         if self.cfg.empty_cache:
                             torch.cuda.empty_cache()
                         bs = 0
