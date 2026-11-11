@@ -9,7 +9,7 @@ seed = 0
 
 # misc custom setting
 batch_size = 12
-loop = 4
+loop = 8
 grid_size = 0.04
 voxel_max = 64000
 lr = 0.0006
@@ -76,7 +76,7 @@ model = dict(
 
 # scheduler settings
 epoch = 20 * loop
-eval_epoch = 50 
+eval_epoch = 20 
 optimizer = dict(type="AdamW", lr=lr, weight_decay=0.05)
 scheduler = dict(
     type="OneCycleLR",
@@ -207,10 +207,11 @@ data = dict(
                 return_inverse=True,
             ),
             dict(type="GridCoord", grid_size=grid_size),
-            # Per-scene fixed random crop center: reproducible across runs (seeded
-            # from the scene name), but spatially varied between scenes. Avoids the
-            # center-bias of mode="center" while keeping the val metric stable.
-            dict(type="SphereCrop", point_max=512000, mode="stable_random"),
+            # Per-scene, per-epoch crop center: reproducible across repeated runs, but
+            # varied between epochs and scenes. This avoids the center bias of
+            # mode="center" without permanently evaluating the same spatial subset.
+            dict(type="SphereCrop", point_max=512000, mode="center"),
+            # dict(type="SphereCrop", point_max=512000, mode="stable_random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),

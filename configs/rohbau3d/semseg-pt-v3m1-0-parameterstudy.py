@@ -21,8 +21,9 @@ num_worker = 24
 # both scenes at batch_size=2, etc.), which would confound the batch_size
 # comparison. Re-enable (e.g. 0.8) for the final training of the chosen config.
 mix_prob = 0
-empty_cache = False
+empty_cache = False  
 empty_cache_per_epoch = False
+empty_cache_test = True
 enable_amp = True
 
 
@@ -76,8 +77,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 2 * loop
-eval_epoch = 2 
+epoch = 40 * loop
+eval_epoch = 40 
 optimizer = dict(type="AdamW", lr=lr, weight_decay=weight_decay)
 scheduler = dict(
     type="OneCycleLR",
@@ -209,11 +210,11 @@ data = dict(
                 return_inverse=True,
             ),
             dict(type="GridCoord", grid_size=grid_size),
-            # Per-scene fixed random crop center: reproducible across runs (seeded
-            # from the scene name), but spatially varied between scenes. Avoids the
-            # center-bias of mode="center" while keeping the val metric stable.
+            # Per-scene, per-epoch crop center: reproducible across repeated runs, but
+            # varied between epochs and scenes. This avoids the center bias of
+            # mode="center" without permanently evaluating the same spatial subset.
             # dict(type="SphereCrop", point_max=512000, mode="center"),
-            dict(type="SphereCrop", point_max=450000, mode="stable_random"),
+            dict(type="SphereCrop", point_max=450000, mode="stable_epoch_random"),
             dict(type="CenterShift", apply_z=False),
             dict(type="NormalizeColor"),
             dict(type="ToTensor"),
@@ -239,25 +240,21 @@ data = dict(
                 hash_type="fnv",
                 mode="train",
                 return_grid_coord=True,
-                return_inverse=True),
+                return_inverse=True)
         ],
         test_mode=True,
         test_cfg=dict(
             voxelize=dict(
-                type="CachedGridSample",
+                type="GridSample",
                 grid_size=grid_size,
                 hash_type="fnv",
                 mode="test",
                 return_grid_coord=True,
-                return_displacement=False),
-            # Tile each test fragment into <=point_max-point crops so a single
-            # forward never exceeds GPU memory (fine grid_size produces huge
-            # fragments -> spconv "can't find suitable algorithm" / OOM). Crops
-            # cover the whole scene; overlaps are averaged. Lower point_max if
-            # testing still OOMs, raise it for fewer/faster forward passes.
-            crop=dict(type="SphereCrop", point_max=100000, mode="all"),
+                return_displacement=False,
+            ),
+            crop=dict(type="SphereCrop", point_max=750000, mode="stable_random"),
+            # crop=None,
             post_transform=[
-                # dict(type="SphereCrop", point_max=650000, mode="stable_random"),
                 dict(type='CenterShift', apply_z=False),
                 dict(type='ToTensor'),
                 dict(

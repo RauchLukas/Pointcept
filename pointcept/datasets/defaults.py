@@ -66,6 +66,9 @@ class DefaultDataset(Dataset):
         )  # force make loop = 1 while in test mode
         self.test_mode = test_mode
         self.test_cfg = test_cfg if test_mode else None
+        # Keep the epoch in shared memory so persistent DataLoader workers see
+        # updates made by the trainer without having to be recreated.
+        self._epoch = torch.zeros((), dtype=torch.int64).share_memory_()
 
         if test_mode:
             self.test_voxelize = TRANSFORMS.build(self.test_cfg.voxelize)
@@ -151,6 +154,10 @@ class DefaultDataset(Dataset):
     def get_data_name(self, idx):
         return os.path.basename(self.data_list[idx % len(self.data_list)])
 
+    def set_epoch(self, epoch):
+        """Set the epoch exposed to epoch-aware data transforms."""
+        self._epoch.fill_(int(epoch))
+
     def get_split_name(self, idx):
         return os.path.basename(
             os.path.dirname(self.data_list[idx % len(self.data_list)])
@@ -159,12 +166,14 @@ class DefaultDataset(Dataset):
     def prepare_train_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+        data_dict["epoch"] = int(self._epoch.item())
         data_dict = self.transform(data_dict)
         return data_dict
 
     def prepare_test_data(self, idx):
         # load data
         data_dict = self.get_data(idx)
+        data_dict["epoch"] = int(self._epoch.item())
         data_dict = self.transform(data_dict)
         result_dict = dict(segment=data_dict.pop("segment"), name=data_dict.pop("name"))
         if "origin_segment" in data_dict:
@@ -188,12 +197,35 @@ class DefaultDataset(Dataset):
             else:
                 data["index"] = np.arange(data["coord"].shape[0])
                 data_part_list = [data]
+            # for data_part in data_part_list:
+            #     if self.test_crop is not None:
+            #         data_part = self.test_crop(data_part)
+            #     else:
+            #         data_part = [data_part]
+            #     fragment_list += data_part
+
+            #--- Patch for test_crop to handle dict/list/tuple return types
             for data_part in data_part_list:
                 if self.test_crop is not None:
                     data_part = self.test_crop(data_part)
+
+                    # test_crop may return either one dict or a list of dicts.
+                    # The fragment pipeline below always expects a list of dicts.
+                    if isinstance(data_part, dict):
+                        data_part = [data_part]
+                    elif isinstance(data_part, tuple):
+                        data_part = list(data_part)
+                    elif isinstance(data_part, list):
+                        pass
+                    else:
+                        raise TypeError(
+                            f"test_crop must return dict/list/tuple, got {type(data_part)}"
+                        )
                 else:
                     data_part = [data_part]
-                fragment_list += data_part
+
+                fragment_list.extend(data_part)
+            #---- 
 
         for i in range(len(fragment_list)):
             fragment_list[i] = self.post_transform(fragment_list[i])
@@ -502,6 +534,12 @@ class ConcatDataset(Dataset):
     def get_data_name(self, idx):
         dataset_idx, data_idx = self.data_list[idx % len(self.data_list)]
         return self.datasets[dataset_idx].get_data_name(data_idx)
+
+    def set_epoch(self, epoch):
+        """Forward epoch updates to every constituent dataset."""
+        for dataset in self.datasets:
+            if hasattr(dataset, "set_epoch"):
+                dataset.set_epoch(epoch)
 
     def __getitem__(self, idx):
         return self.get_data(idx)

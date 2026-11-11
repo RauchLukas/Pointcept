@@ -1,0 +1,8 @@
+config_name,exp_name,feature_set,feat_keys,in_channels,seed,grid_size,voxel_max,batch_size,num_gpu,epoch,loop,total_epoch,lr,weight_decay,mix_prob,wandb_project,enable_wandb
+feature_study/rgb,feature_study/rgb,rgb,color,3,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True
+feature_study/intensity,feature_study/intensity,intensity,strength,1,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True
+feature_study/normals,feature_study/normals,normals,normal,3,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True
+feature_study/rgb_intensity,feature_study/rgb_intensity,rgb+intensity,color+strength,4,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True
+feature_study/rgb_normals,feature_study/rgb_normals,rgb+normals,color+normal,6,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True
+feature_study/intensity_normals,feature_study/intensity_normals,intensity+normals,strength+normal,4,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True
+feature_study/rgb_intensity_normals,feature_study/rgb_intensity_normals,rgb+intensity+normals,color+strength+normal,7,0,0.04,80000,12,4,40,16,640,0.003,0.05,0.0,pointcept_feature_study,True

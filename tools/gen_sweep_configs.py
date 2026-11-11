@@ -32,7 +32,7 @@ import re
 #  Paths / launch settings (edit to taste)
 # --------------------------------------------------------------------------- #
 DATASET = "rohbau3d"
-BASE_CONFIG = "configs/rohbau3d/semseg-pt-v3m1-0-parameterstudy.py"
+BASE_CONFIG = "configs/rohbau3d/semseg-pt-v3m1-0-parameterstudy_determ.py"
 # IMPORTANT: in Pointcept the config ``batch_size`` is the TOTAL across all GPUs
 # and must be divisible by NUM_GPU. The per-GPU batch is batch_size // NUM_GPU.
 # This study uses 4-GPU DDP with per-GPU batch 1/2/3, i.e. TOTAL batch_size of
@@ -42,7 +42,9 @@ NUM_DEVICES = 4  # total GPUs available (only used by the single-GPU parallel la
 
 # Parameters this generator is allowed to substitute. Each MUST exist as a
 # top-level ``name = ...`` assignment in the base config.
-SUBSTITUTABLE = ["lr", "batch_size", "loop", "grid_size", "voxel_max", "mix_prob"]
+SUBSTITUTABLE = ["lr", "weight_decay", "batch_size", "loop", "grid_size", "voxel_max", "mix_prob", "wandb_project", "seed"]
+NON_NAME_KEYS = {"wandb_project"}
+METADATA_KEYS = {"rep"}
 
 # --------------------------------------------------------------------------- #
 #  Phase 0: learning-rate search
@@ -53,22 +55,31 @@ SUBSTITUTABLE = ["lr", "batch_size", "loop", "grid_size", "voxel_max", "mix_prob
 LR_PHASE = dict(
     out_subdir="sweep_lr",
     # batch_size=12 TOTAL = per-GPU 3 x 4 GPUs.
-    fixed=dict(batch_size=12, loop=4, grid_size=0.04, voxel_max=64000, mix_prob=0),
-    grid=dict(lr=[0.0003, 0.0006, 0.001, 0.003, 0.006]),
+    fixed=dict(batch_size=8, loop=4, grid_size=0.08, voxel_max=96000, mix_prob=0),
+    grid=dict(
+        lr=[0.003, 0.004, 0.005],
+        weight_decay=[0.05, 0.1, 0.15],
+        wandb_project=["pointcept_hp_lr_sweep_long"],  # custom your project name e.g. Sonata, PTv3),
+    ),
 )
-
+ 
 # --------------------------------------------------------------------------- #
 #  Phase 1: main sweep. EDIT BEST_LR and the grids after Phase 0 finishes.
 # --------------------------------------------------------------------------- #
 BEST_LR = 0.003  # <-- set to the winner of the lr search
 MAIN_PHASE = dict(
-    out_subdir="sweep_main",
-    fixed=dict(lr=BEST_LR, mix_prob=0),
+    out_subdir="sweep_repeat_determ",  # <-- change this to a new subdir for each sweep
+    fixed=dict(lr=BEST_LR, weight_decay=0.05, mix_prob=0),
     grid=dict(
-        batch_size=[4, 8, 12],  # TOTAL = per-GPU 1/2/3 x 4 GPUs
-        grid_size=[0.08],     # <-- add the grid sizes you want to test
+        batch_size=[12],  # TOTAL = per-GPU 1/2/3 x 4 GPUs
+        grid_size=[0.04],     # <-- add the grid sizes you want to test
         voxel_max=[80000],    # <-- add the voxel_max values you want to test
-        loop=[16],            # <-- add the loop values you want to test
+        loop=[4],            # <-- add the loop values you want to test
+        wandb_project=["pointcept_sweep_determinism_v2"],  # custom your project name e.g. Sonata, PTv3
+        # `rep` gives identical seed runs unique config/experiment names. It is
+        # generator metadata, not a base-config setting.
+        seed=[42],
+        rep=range(1, 11),
     ),
 )
 
@@ -137,14 +148,23 @@ def build_phase(phase_cfg, base_text, root):
         overrides = dict(fixed)
         overrides.update({k: v for k, v in zip(grid_keys, combo)})
 
-        name_tokens = [f"{k}{_tag(v)}" for k, v in zip(grid_keys, combo)]
+        name_tokens = [
+            f"{k}{_tag(v)}" for k, v in zip(grid_keys, combo) if k not in NON_NAME_KEYS
+        ]
+        if not name_tokens:
+            name_tokens = ["run"]
         exp_name = "__".join(name_tokens)
         config_name = f"{out_subdir}/{exp_name}"  # relative to configs/<DATASET>/
 
         # configs are written into configs/<DATASET>/<out_subdir>/ -> one level
         # deeper than the base config, so fix the _base_ relative path depth.
         extra_depth = len(out_subdir.split("/"))
-        config_text = fix_base_depth(substitute(base_text, overrides), extra_depth)
+        config_overrides = {
+            key: value for key, value in overrides.items() if key not in METADATA_KEYS
+        }
+        config_text = fix_base_depth(
+            substitute(base_text, config_overrides), extra_depth
+        )
         config_path = os.path.join(out_dir, f"{exp_name}.py")
         with open(config_path, "w", encoding="utf-8") as fh:
             fh.write(config_text)

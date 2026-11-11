@@ -1,0 +1,2 @@
+config_name,exp_name,batch_size,grid_size,loop,lr,mix_prob,voxel_max,wandb_project,weight_decay
+pointcept_hp_test_main/batch_size12__grid_size0p04__voxel_max80000__loop16,pointcept_hp_test_main/batch_size12__grid_size0p04__voxel_max80000__loop16,12,0.04,16,0.003,0,80000,pointcept_hp_test_main,0.05

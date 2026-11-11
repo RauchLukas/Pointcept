@@ -159,6 +159,14 @@ class Trainer(TrainerBase):
             self.logger.info(">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>")
             for self.epoch in range(self.start_epoch, self.max_epoch):
                 # => before epoch
+                if hasattr(self.train_loader, "dataset") and hasattr(
+                    self.train_loader.dataset, "set_epoch"
+                ):
+                    self.train_loader.dataset.set_epoch(self.epoch)
+                if self.val_loader is not None and hasattr(
+                    self.val_loader.dataset, "set_epoch"
+                ):
+                    self.val_loader.dataset.set_epoch(self.epoch)
                 if comm.get_world_size() > 1:
                     self.train_loader.sampler.set_epoch(self.epoch)
                 self.model.train()

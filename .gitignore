@@ -19,3 +19,4 @@ Dockerfile
 tmp
 wanb
 
+configs/rohbau3d/sweep*

@@ -200,22 +200,9 @@ class SemSegTester(TesterBase):
                             input_dict[key] = input_dict[key].cuda(non_blocking=True)
                     idx_part = input_dict["index"]
                     with torch.no_grad():
-                        # Run inference under autocast (when enable_amp) to cut
-                        # activation memory roughly in half - helps avoid OOM on
-                        # large test fragments. Softmax is done in fp32.
-                        with torch.autocast(
-                            device_type="cuda",
-                            dtype=(
-                                torch.bfloat16
-                                if getattr(self.cfg, "amp_dtype", "float16")
-                                == "bfloat16"
-                                else torch.float16
-                            ),
-                            enabled=getattr(self.cfg, "enable_amp", False),
-                        ):
-                            pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
+                        pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
                         pred_part = F.softmax(pred_part.float(), -1)
-                        if self.cfg.empty_cache:
+                        if self.cfg.empty_cache_test:
                             torch.cuda.empty_cache()
                         bs = 0
                         for be in input_dict["offset"]:
@@ -231,6 +218,17 @@ class SemSegTester(TesterBase):
                             batch_num=len(fragment_list),
                         )
                     )
+
+                # ------ patched
+                # Free the processed fragment to release CPU memory
+                # from https://github.com/Pointcept/Pointcept/issues/532
+                fragment_list[i] = None
+                # also free the input dict to release its tensors/numpy arrays
+                for k in list(input_dict.keys()):
+                    input_dict[k] = None
+                del input_dict
+                # -------
+
                 if self.cfg.data.test.type == "ScanNetPPDataset":
                     pred = pred.topk(3, dim=1)[1].data.cpu().numpy()
                 else:
@@ -482,22 +480,9 @@ class DINOSemSegTester(TesterBase):
                     input_dict["dino_offset"] = dino_offset
                     idx_part = input_dict["index"]
                     with torch.no_grad():
-                        # Run inference under autocast (when enable_amp) to cut
-                        # activation memory roughly in half - helps avoid OOM on
-                        # large test fragments. Softmax is done in fp32.
-                        with torch.autocast(
-                            device_type="cuda",
-                            dtype=(
-                                torch.bfloat16
-                                if getattr(self.cfg, "amp_dtype", "float16")
-                                == "bfloat16"
-                                else torch.float16
-                            ),
-                            enabled=getattr(self.cfg, "enable_amp", False),
-                        ):
-                            pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
+                        pred_part = self.model(input_dict)["seg_logits"]  # (n, k)
                         pred_part = F.softmax(pred_part.float(), -1)
-                        if self.cfg.empty_cache:
+                        if self.cfg.empty_cache_test:
                             torch.cuda.empty_cache()
                         bs = 0
                         for be in input_dict["offset"]:
@@ -513,6 +498,17 @@ class DINOSemSegTester(TesterBase):
                             batch_num=len(fragment_list),
                         )
                     )
+
+                # ------ patched
+                # Free the processed fragment to release CPU memory
+                # from https://github.com/Pointcept/Pointcept/issues/532
+                fragment_list[i] = None
+                # also free the input dict to release its tensors/numpy arrays
+                for k in list(input_dict.keys()):
+                    input_dict[k] = None
+                del input_dict
+                # -------
+
                 if self.cfg.data.test.type == "ScanNetPPDataset":
                     pred = pred.topk(3, dim=1)[1].data.cpu().numpy()
                 else:
@@ -889,7 +885,7 @@ class PartSegTester(TesterBase):
                 with torch.no_grad():
                     pred_part = self.model(input_dict)["cls_logits"]
                     pred_part = F.softmax(pred_part, -1)
-                if self.cfg.empty_cache:
+                if self.cfg.empty_cache_test:
                     torch.cuda.empty_cache()
                 pred_part = pred_part.reshape(-1, label.size, self.cfg.data.num_classes)
                 pred = pred + pred_part.total(dim=0)

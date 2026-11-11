@@ -99,6 +99,7 @@ class Rohbau3DDataset(DefaultDataset):
 
         data_list = []
         for split in split_list:
+            # PROBLEM: glog.glob is non-deterministc https://github.com/Pointcept/Pointcept/issues/622#issuecomment-6732121363
             data_list += glob.glob(
                 os.path.join(self.data_root, split, "site_*", "scene_*")
             )
